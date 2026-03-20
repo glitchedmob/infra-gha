@@ -1,0 +1,80 @@
+name: Run Ansible Playbook
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing Ansible code
+        required: true
+        type: string
+      playbook:
+        description: Playbook filename (relative to playbooks/ directory)
+        required: true
+        type: string
+      use-ssh-key:
+        description: Whether to use SSH key from secrets
+        required: false
+        type: boolean
+        default: false
+      use-vault:
+        description: Whether to use vault password from secrets
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      ssh_key:
+        description: SSH private key for Ansible
+        required: false
+      vault_password:
+        description: Ansible vault password
+        required: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          working-directory: ${{ inputs.working-directory }}
+
+      - uses: actions/cache@v5
+        with:
+          path: ${{ inputs.working-directory }}/collections
+          key: ansible-collections-${{ runner.os }}-${{ hashFiles(format('{0}/requirements.yml', inputs.working-directory)) }}
+
+      - name: Install deps
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          uv sync --locked
+          uv run ansible-galaxy collection install -r requirements.yml
+
+      - name: Setup SSH key
+        if: ${{ inputs.use-ssh-key }}
+        env:
+          SSH_KEY: ${{ secrets.ssh_key }}
+        run: |
+          key_path="$RUNNER_TEMP/ansible-ssh-key"
+          echo "$SSH_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          echo "ANSIBLE_PRIVATE_KEY_FILE=$key_path" >> "$GITHUB_ENV"
+
+      - name: Setup vault password
+        if: ${{ inputs.use-vault }}
+        env:
+          VAULT_PASS: ${{ secrets.vault_password }}
+        run: |
+          vault_path="$RUNNER_TEMP/.vault-pass"
+          echo "$VAULT_PASS" > "$vault_path"
+          echo "ANSIBLE_VAULT_PASSWORD_FILE=$vault_path" >> "$GITHUB_ENV"
+
+      - name: Run playbook
+        working-directory: ${{ inputs.working-directory }}
+        run: uv run ansible-playbook playbooks/${{ inputs.playbook }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f "$ANSIBLE_PRIVATE_KEY_FILE" "$ANSIBLE_VAULT_PASSWORD_FILE" || true
