@@ -1,0 +1,48 @@
+name: Terraform Validate
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing TF code
+        required: true
+        type: string
+      tofu-version-file:
+        description: Path to .tofu-version file relative to working-directory
+        required: false
+        type: string
+        default: .tofu-version
+    secrets:
+      aws_role_arn:
+        description: AWS role ARN for credentials
+        required: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.aws_role_arn }}
+          aws-region: us-east-2
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version_file: ${{ inputs.working-directory }}/${{ inputs.tofu-version-file }}
+
+      - name: Init
+        working-directory: ${{ inputs.working-directory }}
+        run: tofu init
+
+      - name: Validate
+        working-directory: ${{ inputs.working-directory }}
+        run: tofu validate
+
+      - name: Format check
+        working-directory: ${{ inputs.working-directory }}
+        run: tofu fmt -check -recursive
