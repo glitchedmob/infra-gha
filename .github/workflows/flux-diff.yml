@@ -1,0 +1,144 @@
+name: Flux Diff
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing TF code for cluster outputs
+        required: true
+        type: string
+      kustomizations:
+        description: JSON array of {name, path} objects
+        required: true
+        type: string
+    secrets:
+      aws_role_arn:
+        description: AWS role ARN for credentials
+        required: true
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.aws_role_arn }}
+          aws-region: us-east-2
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version_file: ${{ inputs.working-directory }}/.tofu-version
+
+      - name: Init Terraform
+        working-directory: ${{ inputs.working-directory }}
+        run: tofu init
+
+      - name: Read Terraform outputs
+        id: tf-outputs
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "vps_host=$(tofu output -raw vps_hostname)" >> "$GITHUB_OUTPUT"
+          echo "vps_user=$(tofu output -raw ansible_user)" >> "$GITHUB_OUTPUT"
+          echo "ssm_key_path=$(tofu output -raw ssm_private_key_path)" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch SSH key from SSM
+        env:
+          SSM_KEY_PATH: ${{ steps.tf-outputs.outputs.ssm_key_path }}
+        run: |
+          key_path="$RUNNER_TEMP/ssh-key"
+          aws ssm get-parameter --with-decryption --name "$SSM_KEY_PATH" \
+            --query Parameter.Value --output text > "$key_path"
+          chmod 600 "$key_path"
+          echo "SSH_KEY_PATH=$key_path" >> "$GITHUB_ENV"
+
+      - name: Add host key
+        env:
+          VPS_HOST: ${{ steps.tf-outputs.outputs.vps_host }}
+        run: |
+          known_hosts="$RUNNER_TEMP/known_hosts"
+          ssh-keyscan -t ed25519 "$VPS_HOST" >> "$known_hosts"
+          echo "KNOWN_HOSTS_PATH=$known_hosts" >> "$GITHUB_ENV"
+
+      - name: Fetch kubeconfig
+        env:
+          VPS_HOST: ${{ steps.tf-outputs.outputs.vps_host }}
+          VPS_USER: ${{ steps.tf-outputs.outputs.vps_user }}
+        run: |
+          kubeconfig="$RUNNER_TEMP/kubeconfig"
+          ssh -i "$SSH_KEY_PATH" -o UserKnownHostsFile="$KNOWN_HOSTS_PATH" \
+            -o StrictHostKeyChecking=yes \
+            "$VPS_USER@$VPS_HOST" "sudo cat /etc/rancher/k3s/k3s.yaml" > "$kubeconfig"
+          echo "KUBECONFIG=$kubeconfig" >> "$GITHUB_ENV"
+
+      - name: Start SSH tunnel
+        env:
+          VPS_HOST: ${{ steps.tf-outputs.outputs.vps_host }}
+          VPS_USER: ${{ steps.tf-outputs.outputs.vps_user }}
+        run: |
+          ssh -i "$SSH_KEY_PATH" -o UserKnownHostsFile="$KNOWN_HOSTS_PATH" \
+            -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes \
+            -N -L 6443:127.0.0.1:6443 "$VPS_USER@$VPS_HOST" &
+          echo "SSH_TUNNEL_PID=$!" >> "$GITHUB_ENV"
+          sleep 2
+
+      - uses: fluxcd/flux2/action@v2.8.1
+
+      - name: Run Flux diff
+        env:
+          KUSTOMIZATIONS: ${{ inputs.kustomizations }}
+        run: |
+          set -euo pipefail
+          status=0
+          : > flux-diff.txt
+          echo "## Flux diff" >> flux-diff.txt
+          echo "" >> flux-diff.txt
+
+          echo "$KUSTOMIZATIONS" | jq -r '.[] | "\(.name)\t\(.path)"' | while IFS=$'\t' read -r name path; do
+            tmp_output=$(mktemp)
+            exit_code=0
+            flux diff kustomization "$name" --namespace flux-system --path "$path" \
+              --timeout=5m --verbose > "$tmp_output" 2>&1 || exit_code=$?
+            if [ "$exit_code" -gt 1 ]; then
+              status=$exit_code
+            fi
+
+            echo "### ${name}" >> flux-diff.txt
+            echo "" >> flux-diff.txt
+            echo "\`\`\`" >> flux-diff.txt
+            if [ -s "$tmp_output" ]; then
+              cat "$tmp_output" >> flux-diff.txt
+            else
+              echo "No diff output." >> flux-diff.txt
+            fi
+            echo "\`\`\`" >> flux-diff.txt
+            echo "" >> flux-diff.txt
+            rm -f "$tmp_output"
+          done
+
+          if [ "$status" -gt 1 ]; then
+            exit "$status"
+          fi
+
+      - name: Publish summary
+        run: cat flux-diff.txt >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: flux-diff
+          path: flux-diff.txt
+          hide_and_recreate: true
+          hide_classify: OUTDATED
+
+      - name: Stop SSH tunnel
+        if: always()
+        run: kill "$SSH_TUNNEL_PID" || true
+
+      - name: Cleanup
+        if: always()
+        run: rm -f "$SSH_KEY_PATH" "$KNOWN_HOSTS_PATH" || true
