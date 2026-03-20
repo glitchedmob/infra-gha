@@ -1,0 +1,210 @@
+name: Terraform Plan and Apply
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing TF code
+        required: true
+        type: string
+      tofu-version-file:
+        description: Path to .tofu-version file relative to working-directory
+        required: false
+        type: string
+        default: .tofu-version
+      plan-only:
+        description: Run plan only (skip apply)
+        required: false
+        type: boolean
+        default: false
+      encrypt-artifacts:
+        description: Encrypt output artifacts
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      aws_role_arn:
+        description: AWS role ARN for credentials
+        required: true
+      output_encryption_key:
+        description: Key for encrypting output artifacts
+        required: false
+    outputs:
+      plan-summary:
+        description: Path to plan summary markdown
+        value: ${{ jobs.plan.outputs.summary-path }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    outputs:
+      summary-path: ${{ steps.prepare-artifacts.outputs.summary-path }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.aws_role_arn }}
+          aws-region: us-east-2
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version_file: ${{ inputs.working-directory }}/${{ inputs.tofu-version-file }}
+
+      - name: Prepare provider cache
+        run: |
+          cache_dir="$HOME/.terraform.d/plugin-cache"
+          mkdir -p "$cache_dir"
+          echo "TF_PLUGIN_CACHE_DIR=$cache_dir" >> "$GITHUB_ENV"
+
+      - uses: actions/cache@v5
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: tofu-providers-${{ runner.os }}-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.working-directory)) }}
+
+      - uses: kishaningithub/setup-tf-summarize@v2
+
+      - name: Init
+        working-directory: ${{ inputs.working-directory }}
+        run: tofu init
+
+      - name: Prepare artifact directory
+        id: prepare-artifacts
+        run: |
+          output_dir="$RUNNER_TEMP/output"
+          mkdir -p "$output_dir"
+          echo "OUTPUT_ARTIFACT_DIR=$output_dir" >> "$GITHUB_ENV"
+          echo "TF_PLAN_PATH=$output_dir/tfplan" >> "$GITHUB_ENV"
+          echo "summary-path=$output_dir/tfplan-summary.md" >> "$GITHUB_OUTPUT"
+
+      - name: Plan
+        working-directory: ${{ inputs.working-directory }}
+        run: tofu plan -out=${{ env.TF_PLAN_PATH }} > /dev/null
+
+      - name: Render plan summary
+        working-directory: ${{ inputs.working-directory }}
+        run: tofu show -json ${{ env.TF_PLAN_PATH }} | tf-summarize -md > "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan-summary.md"
+
+      - name: Render plan output
+        working-directory: ${{ inputs.working-directory }}
+        run: tofu show ${{ env.TF_PLAN_PATH }} > "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan.txt"
+
+      - name: Encrypt plan artifacts
+        if: ${{ inputs.encrypt-artifacts }}
+        env:
+          KEY: ${{ secrets.output_encryption_key }}
+        run: |
+          openssl enc -aes-256-cbc -pbkdf2 -salt \
+            -in "${{ env.TF_PLAN_PATH }}" \
+            -out "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan.enc" \
+            -pass pass:${KEY}
+          openssl enc -aes-256-cbc -pbkdf2 -salt \
+            -in "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan.txt" \
+            -out "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan.txt.enc" \
+            -pass pass:${KEY}
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: tf-plan
+          path: |
+            ${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan.enc
+            ${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan.txt.enc
+          if-no-files-found: ignore
+
+      - name: Build plan comment
+        run: |
+          artifacts_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          {
+            echo "# Terraform plan"
+            echo "Artifacts: $artifacts_url"
+            echo ""
+            echo "<details><summary>Show summary</summary>"
+            echo ""
+            cat "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan-summary.md"
+            echo ""
+            if [ "${{ inputs.encrypt-artifacts }}" = "true" ]; then
+              echo "Decrypt artifacts:"
+              echo "\`openssl enc -d -aes-256-cbc -pbkdf2 -in tfplan.enc -out tfplan -pass pass:\$OUTPUT_ENCRYPTION_KEY\`"
+              echo "\`openssl enc -d -aes-256-cbc -pbkdf2 -in tfplan.txt.enc -out tfplan.txt -pass pass:\$OUTPUT_ENCRYPTION_KEY\`"
+            fi
+            echo ""
+            echo "</details>"
+          } > tfplan-comment.txt
+
+      - name: Publish plan summary
+        env:
+          KEY: ${{ secrets.output_encryption_key }}
+        run: |
+          {
+            echo "## Terraform plan summary"
+            echo ""
+            cat "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan-summary.md"
+            if [ "${{ inputs.encrypt-artifacts }}" = "true" ]; then
+              echo ""
+              echo "Decrypt artifacts:"
+              echo "\`openssl enc -d -aes-256-cbc -pbkdf2 -in tfplan.enc -out tfplan -pass pass:\$OUTPUT_ENCRYPTION_KEY\`"
+              echo "\`openssl enc -d -aes-256-cbc -pbkdf2 -in tfplan.txt.enc -out tfplan.txt -pass pass:\$OUTPUT_ENCRYPTION_KEY\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: marocchino/sticky-pull-request-comment@v2
+        if: ${{ github.event_name == 'pull_request' }}
+        with:
+          header: tf-plan
+          path: tfplan-comment.txt
+          hide_and_recreate: true
+          hide_classify: OUTDATED
+
+  apply:
+    needs: plan
+    if: ${{ !inputs.plan-only }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.aws_role_arn }}
+          aws-region: us-east-2
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version_file: ${{ inputs.working-directory }}/${{ inputs.tofu-version-file }}
+
+      - name: Init
+        working-directory: ${{ inputs.working-directory }}
+        run: tofu init
+
+      - uses: actions/download-artifact@v6
+        with:
+          name: tf-plan
+          path: ${{ runner.temp }}/artifacts
+
+      - name: Decrypt plan
+        if: ${{ inputs.encrypt-artifacts }}
+        env:
+          KEY: ${{ secrets.output_encryption_key }}
+        run: |
+          openssl enc -d -aes-256-cbc -pbkdf2 \
+            -in "${{ runner.temp }}/artifacts/tfplan.enc" \
+            -out "${{ runner.temp }}/tfplan" \
+            -pass pass:${KEY}
+
+      - name: Apply
+        working-directory: ${{ inputs.working-directory }}
+        run: tofu apply -auto-approve ${{ runner.temp }}/tfplan
+
+      - name: Publish apply summary
+        run: |
+          {
+            echo "## Terraform apply complete"
+            echo "- Mode: apply"
+            echo "- Plan artifact: tfplan (encrypted)"
+          } >> "$GITHUB_STEP_SUMMARY"
