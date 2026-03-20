@@ -1,0 +1,18 @@
+name: Setup Ansible
+description: Install and cache Ansible via uv
+inputs:
+  working-directory:
+    description: Directory containing Ansible code
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        working-directory: ${{ inputs.working-directory }}
+
+    - uses: actions/cache@v5
+      with:
+        path: ${{ inputs.working-directory }}/collections
+        key: ansible-collections-${{ runner.os }}-${{ hashFiles(format('{0}/requirements.yml', inputs.working-directory)) }}
