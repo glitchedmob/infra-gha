@@ -101,11 +101,11 @@ jobs:
           openssl enc -aes-256-cbc -pbkdf2 -salt \
             -in "${{ env.TF_PLAN_PATH }}" \
             -out "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan.enc" \
-            -pass pass:${KEY}
+            -pass "pass:${KEY}"
           openssl enc -aes-256-cbc -pbkdf2 -salt \
             -in "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan.txt" \
             -out "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan.txt.enc" \
-            -pass pass:${KEY}
+            -pass "pass:${KEY}"
 
       - uses: actions/upload-artifact@v6
         with:
@@ -195,7 +195,7 @@ jobs:
           openssl enc -d -aes-256-cbc -pbkdf2 \
             -in "${{ runner.temp }}/artifacts/tfplan.enc" \
             -out "${{ runner.temp }}/tfplan" \
-            -pass pass:${KEY}
+            -pass "pass:${KEY}"
 
       - name: Apply
         working-directory: ${{ inputs.working-directory }}

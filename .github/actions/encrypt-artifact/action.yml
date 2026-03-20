@@ -20,4 +20,4 @@ runs:
         openssl enc -aes-256-cbc -pbkdf2 -salt \
           -in "${{ inputs.input-file }}" \
           -out "${{ inputs.output-file }}" \
-          -pass pass:${KEY}
+          -pass "pass:${KEY}"

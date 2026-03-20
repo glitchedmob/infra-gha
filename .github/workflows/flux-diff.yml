@@ -43,9 +43,11 @@ jobs:
         id: tf-outputs
         working-directory: ${{ inputs.working-directory }}
         run: |
-          echo "vps_host=$(tofu output -raw vps_hostname)" >> "$GITHUB_OUTPUT"
-          echo "vps_user=$(tofu output -raw ansible_user)" >> "$GITHUB_OUTPUT"
-          echo "ssm_key_path=$(tofu output -raw ssm_private_key_path)" >> "$GITHUB_OUTPUT"
+          {
+            echo "vps_host=$(tofu output -raw vps_hostname)"
+            echo "vps_user=$(tofu output -raw ansible_user)"
+            echo "ssm_key_path=$(tofu output -raw ssm_private_key_path)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Fetch SSH key from SSM
         env:
@@ -96,8 +98,10 @@ jobs:
           set -euo pipefail
           status=0
           : > flux-diff.txt
-          echo "## Flux diff" >> flux-diff.txt
-          echo "" >> flux-diff.txt
+          {
+            echo "## Flux diff"
+            echo ""
+          } >> flux-diff.txt
 
           echo "$KUSTOMIZATIONS" | jq -r '.[] | "\(.name)\t\(.path)"' | while IFS=$'\t' read -r name path; do
             tmp_output=$(mktemp)
@@ -108,16 +112,21 @@ jobs:
               status=$exit_code
             fi
 
-            echo "### ${name}" >> flux-diff.txt
-            echo "" >> flux-diff.txt
-            echo "\`\`\`" >> flux-diff.txt
+            {
+              echo "### ${name}"
+              echo ""
+              echo "\`\`\`"
+            } >> flux-diff.txt
             if [ -s "$tmp_output" ]; then
               cat "$tmp_output" >> flux-diff.txt
             else
               echo "No diff output." >> flux-diff.txt
             fi
-            echo "\`\`\`" >> flux-diff.txt
-            echo "" >> flux-diff.txt
+            {
+              echo "\`\`\`"
+              echo ""
+              echo ""
+            } >> flux-diff.txt
             rm -f "$tmp_output"
           done
 
