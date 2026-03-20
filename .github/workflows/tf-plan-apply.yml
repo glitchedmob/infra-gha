@@ -51,7 +51,7 @@ jobs:
           role-to-assume: ${{ secrets.aws_role_arn }}
           aws-region: us-east-2
 
-      - uses: opentofu/setup-opentofu@v1
+      - uses: opentofu/setup-opentofu@v2
         with:
           tofu_version_file: ${{ inputs.working-directory }}/${{ inputs.tofu-version-file }}
 
@@ -107,7 +107,7 @@ jobs:
             -out "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan.txt.enc" \
             -pass "pass:${KEY}"
 
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         with:
           name: tf-plan
           path: |
@@ -151,7 +151,7 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: marocchino/sticky-pull-request-comment@v2
+      - uses: marocchino/sticky-pull-request-comment@v3
         if: ${{ github.event_name == 'pull_request' }}
         with:
           header: tf-plan
@@ -174,7 +174,7 @@ jobs:
           role-to-assume: ${{ secrets.aws_role_arn }}
           aws-region: us-east-2
 
-      - uses: opentofu/setup-opentofu@v1
+      - uses: opentofu/setup-opentofu@v2
         with:
           tofu_version_file: ${{ inputs.working-directory }}/${{ inputs.tofu-version-file }}
 
@@ -182,7 +182,7 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: tofu init
 
-      - uses: actions/download-artifact@v6
+      - uses: actions/download-artifact@v8
         with:
           name: tf-plan
           path: ${{ runner.temp }}/artifacts
