@@ -1,0 +1,47 @@
+name: Dependabot TF Lockfile
+
+on:
+  push:
+    branches:
+      - dependabot/**
+    paths:
+      - tf/**
+
+permissions:
+  contents: write
+
+jobs:
+  update-lockfile:
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: true
+          fetch-depth: 0
+
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version_file: tf/.tofu-version
+
+      - name: Initialize OpenTofu
+        working-directory: tf
+        run: tofu init -backend=false
+
+      - name: Regenerate provider lockfile
+        working-directory: tf
+        run: tofu providers lock
+
+      - name: Commit lockfile updates
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No lockfile changes to commit."
+            exit 0
+          fi
+
+          git add "tf/.terraform.lock.hcl"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: normalize TF provider lockfile"
+          git pull --rebase origin "${GITHUB_REF_NAME}"
+          git push
