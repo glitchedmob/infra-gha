@@ -1,0 +1,33 @@
+name: Ansible Lint
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing Ansible code
+        required: true
+        type: string
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          working-directory: ${{ inputs.working-directory }}
+
+      - uses: actions/cache@v5
+        with:
+          path: ${{ inputs.working-directory }}/collections
+          key: ansible-collections-${{ runner.os }}-${{ hashFiles(format('{0}/requirements.yml', inputs.working-directory)) }}
+
+      - name: Install deps
+        working-directory: ${{ inputs.working-directory }}
+        run: uv sync --locked
+
+      - name: Lint
+        working-directory: ${{ inputs.working-directory }}
+        run: uv run ansible-lint
