@@ -1,0 +1,23 @@
+name: Encrypt Artifact
+description: Encrypt file with openssl
+inputs:
+  input-file:
+    description: Path to file to encrypt
+    required: true
+  output-file:
+    description: Path for encrypted output
+    required: true
+  encryption-key:
+    description: Encryption key
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        KEY: ${{ inputs.encryption-key }}
+      run: |
+        openssl enc -aes-256-cbc -pbkdf2 -salt \
+          -in "${{ inputs.input-file }}" \
+          -out "${{ inputs.output-file }}" \
+          -pass pass:${KEY}
