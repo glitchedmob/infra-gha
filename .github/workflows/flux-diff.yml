@@ -11,6 +11,11 @@ on:
         description: JSON array of {name, path} objects
         required: true
         type: string
+      envrc_content:
+        description: Content to write to .envrc file (optional)
+        required: false
+        type: string
+        default: ""
     secrets:
       aws_role_arn:
         description: AWS role ARN for credentials
@@ -25,6 +30,10 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v6
+
+      - name: Write .envrc
+        if: ${{ inputs.envrc_content != '' }}
+        run: echo "${{ inputs.envrc_content }}" > .envrc
 
       - uses: aws-actions/configure-aws-credentials@v6
         with:

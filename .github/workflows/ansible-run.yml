@@ -21,6 +21,11 @@ on:
         required: false
         type: boolean
         default: false
+      envrc_content:
+        description: Content to write to .envrc file (optional)
+        required: false
+        type: string
+        default: ""
     secrets:
       ssh_key:
         description: SSH private key for Ansible
@@ -34,6 +39,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+
+      - name: Write .envrc
+        if: ${{ inputs.envrc_content != '' }}
+        run: echo "${{ inputs.envrc_content }}" > .envrc
 
       - uses: astral-sh/setup-uv@v7
         with:
