@@ -12,10 +12,15 @@ on:
         required: false
         type: string
         default: .tofu-version
+      init-backend:
+        description: Enable backend during tofu init
+        required: false
+        type: boolean
+        default: true
     secrets:
       aws_role_arn:
         description: AWS role ARN for credentials
-        required: true
+        required: false
 
 jobs:
   validate:
@@ -27,6 +32,7 @@ jobs:
       - uses: actions/checkout@v6
 
       - uses: aws-actions/configure-aws-credentials@v6
+        if: ${{ secrets.aws_role_arn != '' }}
         with:
           role-to-assume: ${{ secrets.aws_role_arn }}
           aws-region: us-east-2
@@ -37,7 +43,12 @@ jobs:
 
       - name: Init
         working-directory: ${{ inputs.working-directory }}
-        run: tofu init
+        run: |
+          if [ "${{ inputs.init-backend }}" = "true" ]; then
+            tofu init
+          else
+            tofu init -backend=false
+          fi
 
       - name: Validate
         working-directory: ${{ inputs.working-directory }}
