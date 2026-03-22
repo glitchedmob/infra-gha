@@ -1,0 +1,90 @@
+name: Ansible Auto
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing Ansible code
+        required: true
+        type: string
+      trigger-map:
+        description: 'JSON mapping of playbook to file path prefixes. Example: {"apply.yml": ["playbooks/apply.yml", "playbooks/manifests"]}'
+        required: true
+        type: string
+      envrc_content:
+        description: Content to write to .envrc file (optional)
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 2
+
+      - name: Write .envrc
+        if: ${{ inputs.envrc_content != '' }}
+        run: echo "${{ inputs.envrc_content }}" > .envrc
+
+      - name: Detect changed files
+        id: detect
+        env:
+          TRIGGER_MAP: ${{ inputs.trigger-map }}
+        run: |
+          set -euo pipefail
+
+          changed=$(git diff --name-only HEAD~1 HEAD)
+          to_run=()
+
+          while IFS= read -r playbook; do
+            patterns=$(echo "$TRIGGER_MAP" | jq -r ".[\"$playbook\"][]")
+            for pattern in $patterns; do
+              if echo "$changed" | grep -q "^${pattern}"; then
+                to_run+=("$playbook")
+                break
+              fi
+            done
+          done < <(echo "$TRIGGER_MAP" | jq -r 'keys[]')
+
+          if [ ${#to_run[@]} -eq 0 ]; then
+            echo 'playbooks=[]' >> "$GITHUB_OUTPUT"
+          else
+            json=$(printf '%s\n' "${to_run[@]}" | jq -R . | jq -sc .)
+            echo "playbooks=$json" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Log affected playbooks
+        run: echo "Affected playbooks: ${{ steps.detect.outputs.playbooks }}"
+
+      - uses: astral-sh/setup-uv@v7
+        if: ${{ steps.detect.outputs.playbooks != '[]' }}
+        with:
+          enable-cache: true
+          working-directory: ${{ inputs.working-directory }}
+
+      - uses: actions/cache@v5
+        if: ${{ steps.detect.outputs.playbooks != '[]' }}
+        with:
+          path: ${{ inputs.working-directory }}/collections
+          key: ansible-collections-${{ runner.os }}-${{ hashFiles(format('{0}/requirements.yml', inputs.working-directory)) }}
+
+      - name: Install deps
+        if: ${{ steps.detect.outputs.playbooks != '[]' }}
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          uv sync --locked
+          uv run ansible-galaxy collection install -r requirements.yml
+
+      - name: Run affected playbooks
+        if: ${{ steps.detect.outputs.playbooks != '[]' }}
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          set -euo pipefail
+          echo '${{ steps.detect.outputs.playbooks }}' | jq -r '.[]' | while read -r playbook; do
+            echo "::group::Running $playbook"
+            uv run ansible-playbook "playbooks/$playbook"
+            echo "::endgroup::"
+          done
