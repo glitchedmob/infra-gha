@@ -28,15 +28,3 @@ jobs:
       - env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx semantic-release
-
-      - name: Update major tag
-        if: ${{ steps.release.outputs.release_created }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          tag="${{ steps.release.outputs.tag_name }}"
-          major=$(echo "$tag" | cut -d. -f1)
-
-          git tag -fa "$major" -m "Update $major to $tag"
-          git push origin "$major" --force
