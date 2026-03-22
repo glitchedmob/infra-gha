@@ -28,11 +28,13 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    env:
+      AWS_ROLE_ARN: ${{ secrets.aws_role_arn }}
     steps:
       - uses: actions/checkout@v6
 
       - uses: aws-actions/configure-aws-credentials@v6
-        if: ${{ secrets.aws_role_arn != '' }}
+        if: ${{ env.AWS_ROLE_ARN != '' }}
         with:
           role-to-assume: ${{ secrets.aws_role_arn }}
           aws-region: us-east-2
