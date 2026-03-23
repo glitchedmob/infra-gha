@@ -3,15 +3,11 @@ name: Terraform Validate
 on:
   workflow_call:
     inputs:
-      working-directory:
-        description: Directory containing TF code
-        required: true
-        type: string
-      tofu-version-file:
-        description: Path to .tofu-version file relative to working-directory
+      repo-root:
+        description: Path to repo root containing the Makefile
         required: false
         type: string
-        default: .tofu-version
+        default: .
       init-backend:
         description: Enable backend during tofu init
         required: false
@@ -51,22 +47,20 @@ jobs:
           aws-region: us-east-2
 
       - uses: opentofu/setup-opentofu@v2
-        with:
-          tofu_version_file: ${{ inputs.working-directory }}/${{ inputs.tofu-version-file }}
 
       - name: Init
-        working-directory: ${{ inputs.working-directory }}
+        working-directory: ${{ inputs.repo-root }}
         run: |
           if [ "${{ inputs.init-backend }}" = "true" ]; then
-            tofu init
+            make tf-init
           else
-            tofu init -backend=false
+            make tf-init ARGS="-backend=false"
           fi
 
       - name: Validate
-        working-directory: ${{ inputs.working-directory }}
-        run: tofu validate
+        working-directory: ${{ inputs.repo-root }}
+        run: make tf-validate
 
       - name: Format check
-        working-directory: ${{ inputs.working-directory }}
-        run: tofu fmt -check -recursive
+        working-directory: ${{ inputs.repo-root }}
+        run: make tf-format

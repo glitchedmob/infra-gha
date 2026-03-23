@@ -3,20 +3,26 @@ name: Terraform Plan and Apply
 on:
   workflow_call:
     inputs:
-      working-directory:
-        description: Directory containing TF code
-        required: true
-        type: string
-      tofu-version-file:
-        description: Path to .tofu-version file relative to working-directory
+      repo-root:
+        description: Path to repo root containing the Makefile
         required: false
         type: string
-        default: .tofu-version
+        default: .
       plan-only:
         description: Run plan only (skip apply)
         required: false
         type: boolean
         default: false
+      destroy:
+        description: Run a destroy plan instead of a regular plan
+        required: false
+        type: boolean
+        default: false
+      target-list:
+        description: Optional targets, comma-separated (e.g. 'resource1,resource2')
+        required: false
+        type: string
+        default: ''
       encrypt-artifacts:
         description: Encrypt output artifacts
         required: false
@@ -63,8 +69,6 @@ jobs:
           aws-region: us-east-2
 
       - uses: opentofu/setup-opentofu@v2
-        with:
-          tofu_version_file: ${{ inputs.working-directory }}/${{ inputs.tofu-version-file }}
 
       - name: Prepare provider cache
         run: |
@@ -75,13 +79,13 @@ jobs:
       - uses: actions/cache@v5
         with:
           path: ~/.terraform.d/plugin-cache
-          key: tofu-providers-${{ runner.os }}-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.working-directory)) }}
+          key: tofu-providers-${{ runner.os }}-${{ hashFiles(format('{0}/tf/.terraform.lock.hcl', inputs.repo-root)) }}
 
       - uses: kishaningithub/setup-tf-summarize@v2
 
       - name: Init
-        working-directory: ${{ inputs.working-directory }}
-        run: tofu init
+        working-directory: ${{ inputs.repo-root }}
+        run: make tf-init
 
       - name: Prepare artifact directory
         id: prepare-artifacts
@@ -92,17 +96,35 @@ jobs:
           echo "TF_PLAN_PATH=$output_dir/tfplan" >> "$GITHUB_ENV"
           echo "summary-path=$output_dir/tfplan-summary.md" >> "$GITHUB_OUTPUT"
 
+      - name: Build plan args
+        run: |
+          plan_args="-out=${{ env.TF_PLAN_PATH }}"
+
+          if [ "${{ inputs.destroy }}" = "true" ]; then
+            plan_args="$plan_args -destroy"
+          fi
+
+          if [ -n "${{ inputs.target-list }}" ]; then
+            IFS=',' read -ra targets <<< "${{ inputs.target-list }}"
+            for target in "${targets[@]}"; do
+              target=$(echo "$target" | xargs)
+              plan_args="$plan_args -target=$target"
+            done
+          fi
+
+          echo "TF_PLAN_ARGS=$plan_args" >> "$GITHUB_ENV"
+
       - name: Plan
-        working-directory: ${{ inputs.working-directory }}
-        run: tofu plan -out=${{ env.TF_PLAN_PATH }} > /dev/null
+        working-directory: ${{ inputs.repo-root }}
+        run: make tf-plan ARGS="${{ env.TF_PLAN_ARGS }}" > /dev/null
 
       - name: Render plan summary
-        working-directory: ${{ inputs.working-directory }}
-        run: tofu show -json ${{ env.TF_PLAN_PATH }} | tf-summarize -md > "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan-summary.md"
+        working-directory: ${{ inputs.repo-root }}
+        run: make tf-show ARGS="-json ${{ env.TF_PLAN_PATH }}" | tf-summarize -md > "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan-summary.md"
 
       - name: Render plan output
-        working-directory: ${{ inputs.working-directory }}
-        run: tofu show ${{ env.TF_PLAN_PATH }} > "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan.txt"
+        working-directory: ${{ inputs.repo-root }}
+        run: make tf-show ARGS="${{ env.TF_PLAN_PATH }}" > "${{ env.OUTPUT_ARTIFACT_DIR }}/tfplan.txt"
 
       - name: Encrypt plan artifacts
         if: ${{ inputs.encrypt-artifacts }}
@@ -194,12 +216,10 @@ jobs:
           aws-region: us-east-2
 
       - uses: opentofu/setup-opentofu@v2
-        with:
-          tofu_version_file: ${{ inputs.working-directory }}/${{ inputs.tofu-version-file }}
 
       - name: Init
-        working-directory: ${{ inputs.working-directory }}
-        run: tofu init
+        working-directory: ${{ inputs.repo-root }}
+        run: make tf-init
 
       - uses: actions/download-artifact@v8
         with:
@@ -217,8 +237,8 @@ jobs:
             -pass "pass:${KEY}"
 
       - name: Apply
-        working-directory: ${{ inputs.working-directory }}
-        run: tofu apply -auto-approve ${{ runner.temp }}/tfplan
+        working-directory: ${{ inputs.repo-root }}
+        run: make tf-apply ARGS="-auto-approve ${{ runner.temp }}/tfplan"
 
       - name: Publish apply summary
         run: |
