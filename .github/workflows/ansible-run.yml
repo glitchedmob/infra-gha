@@ -74,9 +74,7 @@ jobs:
         env:
           ENVRC_CONTENT: ${{ secrets.envrc_content }}
         run: |
-          if [ -n "$ENVRC_CONTENT" ]; then
-            echo "$ENVRC_CONTENT" > .envrc
-          fi
+          printf '%s' "${ENVRC_CONTENT:-}" > .envrc
 
       - name: Configure AWS credentials
         if: ${{ inputs.initialize-terraform && env.AWS_ROLE_ARN != '' }}

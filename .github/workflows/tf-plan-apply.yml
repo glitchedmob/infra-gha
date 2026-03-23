@@ -59,9 +59,7 @@ jobs:
         env:
           ENVRC_CONTENT: ${{ secrets.envrc_content }}
         run: |
-          if [ -n "$ENVRC_CONTENT" ]; then
-            echo "$ENVRC_CONTENT" > .envrc
-          fi
+          printf '%s' "${ENVRC_CONTENT:-}" > .envrc
 
       - uses: aws-actions/configure-aws-credentials@v6
         with:
@@ -206,9 +204,7 @@ jobs:
         env:
           ENVRC_CONTENT: ${{ secrets.envrc_content }}
         run: |
-          if [ -n "$ENVRC_CONTENT" ]; then
-            echo "$ENVRC_CONTENT" > .envrc
-          fi
+          printf '%s' "${ENVRC_CONTENT:-}" > .envrc
 
       - uses: aws-actions/configure-aws-credentials@v6
         with:
