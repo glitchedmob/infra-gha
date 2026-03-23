@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Write .envrc
         env:
@@ -37,20 +37,23 @@ jobs:
             echo "$ENVRC_CONTENT" > .envrc
           fi
 
-      - name: Detect changed files
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v45
+
+      - name: Detect playbooks to run
         id: detect
         env:
           TRIGGER_MAP: ${{ inputs.trigger-map }}
+          ALL_CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
         run: |
           set -euo pipefail
-
-          changed=$(git diff --name-only HEAD~1 HEAD)
           to_run=()
 
           while IFS= read -r playbook; do
             patterns=$(echo "$TRIGGER_MAP" | jq -r ".[\"$playbook\"][]")
             for pattern in $patterns; do
-              if echo "$changed" | grep -q "^${pattern}"; then
+              if echo "$ALL_CHANGED_FILES" | grep -q "^${pattern}"; then
                 to_run+=("$playbook")
                 break
               fi
