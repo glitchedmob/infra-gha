@@ -7,6 +7,26 @@ on:
         description: Directory containing Ansible code
         required: true
         type: string
+      initialize-terraform:
+        description: Initialize OpenTofu/Terraform before running Ansible
+        required: false
+        type: boolean
+        default: false
+      terraform-working-directory:
+        description: Directory containing Terraform code
+        required: false
+        type: string
+        default: src/tf
+      terraform-init-args:
+        description: Additional arguments for make tf-init
+        required: false
+        type: string
+        default: ""
+      aws-region:
+        description: AWS region for optional Terraform auth
+        required: false
+        type: string
+        default: us-east-2
       trigger-map:
         description: 'JSON mapping of playbook to file path prefixes. Example: {"apply.yml": ["playbooks/apply.yml", "playbooks/manifests"]}'
         required: true
@@ -14,6 +34,9 @@ on:
     secrets:
       envrc_content:
         description: Content to write to .envrc file (optional)
+        required: false
+      aws_role_arn:
+        description: AWS role ARN for optional Terraform auth
         required: false
       output_encryption_key:
         description: Key for encrypting output artifacts
@@ -24,6 +47,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      id-token: write
+    env:
+      AWS_ROLE_ARN: ${{ secrets.aws_role_arn }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -35,6 +61,38 @@ jobs:
         run: |
           if [ -n "$ENVRC_CONTENT" ]; then
             echo "$ENVRC_CONTENT" > .envrc
+          fi
+
+      - name: Configure AWS credentials
+        if: ${{ inputs.initialize-terraform && env.AWS_ROLE_ARN != '' }}
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.aws_role_arn }}
+          aws-region: ${{ inputs.aws-region }}
+
+      - uses: opentofu/setup-opentofu@v2
+        if: ${{ inputs.initialize-terraform }}
+
+      - name: Prepare provider cache
+        if: ${{ inputs.initialize-terraform }}
+        run: |
+          cache_dir="$HOME/.terraform.d/plugin-cache"
+          mkdir -p "$cache_dir"
+          echo "TF_PLUGIN_CACHE_DIR=$cache_dir" >> "$GITHUB_ENV"
+
+      - uses: actions/cache@v5
+        if: ${{ inputs.initialize-terraform }}
+        with:
+          path: ~/.terraform.d/plugin-cache
+          key: tofu-providers-${{ runner.os }}-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.terraform-working-directory)) }}
+
+      - name: Init Terraform
+        if: ${{ inputs.initialize-terraform }}
+        run: |
+          if [ -n "${{ inputs.terraform-init-args }}" ]; then
+            make tf-init ARGS="${{ inputs.terraform-init-args }}"
+          else
+            make tf-init
           fi
 
       - name: Get changed files
