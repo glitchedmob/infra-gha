@@ -55,10 +55,7 @@ jobs:
           key: ansible-collections-${{ runner.os }}-${{ hashFiles(format('{0}/requirements.yml', inputs.working-directory)) }}
 
       - name: Install deps
-        working-directory: ${{ inputs.working-directory }}
-        run: |
-          uv sync --locked
-          uv run ansible-galaxy collection install -r requirements.yml
+        run: make ansible-install
 
       - name: Setup SSH key
         if: ${{ inputs.use-ssh-key }}
@@ -80,8 +77,7 @@ jobs:
           echo "ANSIBLE_VAULT_PASSWORD_FILE=$vault_path" >> "$GITHUB_ENV"
 
       - name: Run playbook
-        working-directory: ${{ inputs.working-directory }}
-        run: uv run ansible-playbook playbooks/${{ inputs.playbook }}
+        run: make ansible PLAYBOOK=${{ inputs.playbook }}
 
       - name: Cleanup
         if: always()

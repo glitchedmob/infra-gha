@@ -73,18 +73,14 @@ jobs:
 
       - name: Install deps
         if: ${{ steps.detect.outputs.playbooks != '[]' }}
-        working-directory: ${{ inputs.working-directory }}
-        run: |
-          uv sync --locked
-          uv run ansible-galaxy collection install -r requirements.yml
+        run: make ansible-install
 
       - name: Run affected playbooks
         if: ${{ steps.detect.outputs.playbooks != '[]' }}
-        working-directory: ${{ inputs.working-directory }}
         run: |
           set -euo pipefail
           echo '${{ steps.detect.outputs.playbooks }}' | jq -r '.[]' | while read -r playbook; do
             echo "::group::Running $playbook"
-            uv run ansible-playbook "playbooks/$playbook"
+            make ansible PLAYBOOK="$playbook"
             echo "::endgroup::"
           done
