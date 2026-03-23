@@ -28,6 +28,11 @@ on:
         required: false
         type: boolean
         default: true
+      headscale-login-server:
+        description: Optional Headscale login server URL
+        required: false
+        type: string
+        default: ""
     secrets:
       envrc_content:
         description: Content to write to .envrc file (optional)
@@ -37,6 +42,9 @@ on:
         required: true
       output_encryption_key:
         description: Key for encrypting output artifacts
+        required: false
+      headscale_auth_key:
+        description: Optional Headscale auth key for connectivity
         required: false
     outputs:
       plan-summary:
@@ -65,6 +73,12 @@ jobs:
         with:
           role-to-assume: ${{ secrets.aws_role_arn }}
           aws-region: us-east-2
+
+      - name: Connect Headscale (optional)
+        uses: ./.github/actions/headscale-connect
+        with:
+          headscale-login-server: ${{ inputs.headscale-login-server }}
+          headscale-auth-key: ${{ secrets.headscale_auth_key }}
 
       - uses: opentofu/setup-opentofu@v2
 
@@ -210,6 +224,12 @@ jobs:
         with:
           role-to-assume: ${{ secrets.aws_role_arn }}
           aws-region: us-east-2
+
+      - name: Connect Headscale (optional)
+        uses: ./.github/actions/headscale-connect
+        with:
+          headscale-login-server: ${{ inputs.headscale-login-server }}
+          headscale-auth-key: ${{ secrets.headscale_auth_key }}
 
       - uses: opentofu/setup-opentofu@v2
 

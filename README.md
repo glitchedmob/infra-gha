@@ -27,6 +27,7 @@ Reusable GitHub Actions workflows and composite actions for glitchedmob infrastr
 | `setup-tf` | Install and cache OpenTofu |
 | `setup-ansible` | Install and cache Ansible via uv |
 | `encrypt-artifact` | Encrypt output artifacts |
+| `headscale-connect` | Optional Headscale session bootstrap |
 
 **Note:** Environment setup (`.envrc`) is handled by consumer repos via local `setup-env` actions.
 
@@ -53,6 +54,38 @@ jobs:
     with:
       working-directory: tf
     secrets:
+      aws_role_arn: ${{ secrets.AWS_GHA_TERRAFORM_ROLE_ARN }}
+```
+
+## Optional Headscale Connectivity
+
+Reusable workflows can optionally join Headscale before Terraform/Ansible work. Connectivity is enabled automatically when:
+
+- `headscale-login-server` is set, and
+- `secrets.headscale_auth_key` is set.
+
+Reusable workflows call the shared composite action at `./.github/actions/headscale-connect`, which validates inputs, uses the auth key secret, connects, and prints `tailscale status`.
+
+```yaml
+jobs:
+  plan:
+    uses: glitchedmob/infra-gha/.github/workflows/tf-plan-apply.yml@main
+    with:
+      plan-only: true
+      headscale-login-server: https://headscale.example.com
+    secrets:
+      headscale_auth_key: ${{ secrets.HEADSCALE_AUTH_KEY }}
+      aws_role_arn: ${{ secrets.AWS_GHA_TERRAFORM_ROLE_ARN }}
+      output_encryption_key: ${{ secrets.OUTPUT_ENCRYPTION_KEY }}
+
+  ansible:
+    uses: glitchedmob/infra-gha/.github/workflows/ansible-run.yml@main
+    with:
+      working-directory: src/ansible
+      playbook: bootstrap.yml
+      headscale-login-server: https://headscale.example.com
+    secrets:
+      headscale_auth_key: ${{ secrets.HEADSCALE_AUTH_KEY }}
       aws_role_arn: ${{ secrets.AWS_GHA_TERRAFORM_ROLE_ARN }}
 ```
 

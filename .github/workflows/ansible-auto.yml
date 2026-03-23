@@ -31,6 +31,11 @@ on:
         description: 'JSON mapping of playbook to file path prefixes. Example: {"apply.yml": ["playbooks/apply.yml", "playbooks/manifests"]}'
         required: true
         type: string
+      headscale-login-server:
+        description: Optional Headscale login server URL
+        required: false
+        type: string
+        default: ""
     secrets:
       envrc_content:
         description: Content to write to .envrc file (optional)
@@ -40,6 +45,9 @@ on:
         required: false
       output_encryption_key:
         description: Key for encrypting output artifacts
+        required: false
+      headscale_auth_key:
+        description: Optional Headscale auth key for connectivity
         required: false
 
 jobs:
@@ -67,6 +75,12 @@ jobs:
         with:
           role-to-assume: ${{ secrets.aws_role_arn }}
           aws-region: ${{ inputs.aws-region }}
+
+      - name: Connect Headscale (optional)
+        uses: ./.github/actions/headscale-connect
+        with:
+          headscale-login-server: ${{ inputs.headscale-login-server }}
+          headscale-auth-key: ${{ secrets.headscale_auth_key }}
 
       - uses: opentofu/setup-opentofu@v2
         if: ${{ inputs.initialize-terraform }}
