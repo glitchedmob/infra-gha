@@ -52,7 +52,7 @@ runs:
       uses: tailscale/github-action@v4
       with:
         authkey: ${{ env.HEADSCALE_AUTH_KEY }}
-        args: --login-server=${{ inputs.headscale-login-server }} --accept-routes
+        args: --login-server=${{ inputs.headscale-login-server }}
 
     - name: Verify Headscale session
       if: ${{ steps.config.outputs.enabled == 'true' }}
