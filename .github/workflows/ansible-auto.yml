@@ -77,7 +77,7 @@ jobs:
           aws-region: ${{ inputs.aws-region }}
 
       - name: Connect Headscale (optional)
-        uses: ./.github/actions/headscale-connect
+        uses: glitchedmob/infra-gha/.github/actions/headscale-connect@main
         with:
           headscale-login-server: ${{ inputs.headscale-login-server }}
           headscale-auth-key: ${{ secrets.headscale_auth_key }}

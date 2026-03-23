@@ -75,7 +75,7 @@ jobs:
           aws-region: us-east-2
 
       - name: Connect Headscale (optional)
-        uses: ./.github/actions/headscale-connect
+        uses: glitchedmob/infra-gha/.github/actions/headscale-connect@main
         with:
           headscale-login-server: ${{ inputs.headscale-login-server }}
           headscale-auth-key: ${{ secrets.headscale_auth_key }}
@@ -226,7 +226,7 @@ jobs:
           aws-region: us-east-2
 
       - name: Connect Headscale (optional)
-        uses: ./.github/actions/headscale-connect
+        uses: glitchedmob/infra-gha/.github/actions/headscale-connect@main
         with:
           headscale-login-server: ${{ inputs.headscale-login-server }}
           headscale-auth-key: ${{ secrets.headscale_auth_key }}
