@@ -2,14 +2,23 @@
 
 Reusable GitHub Actions workflows and composite actions for glitchedmob infrastructure.
 
+## Scope
+
+- **Reusable workflows (`.github/workflows/`)**: shared CI/CD workflows consumed by infrastructure repos.
+- **Composite actions (`.github/actions/`)**: shared setup and artifact utility actions.
+
 ## Workflows
 
 | Workflow | Purpose |
 |----------|---------|
+| `ci.yml` | Top-level CI orchestration |
+| `release.yml` | Tagged release automation |
+| `dependabot-tf-lock.yml` | Terraform lockfile maintenance |
 | `tf-validate.yml` | Validate and format check Terraform |
 | `tf-plan-apply.yml` | Plan and optionally apply Terraform |
 | `ansible-lint.yml` | Lint Ansible playbooks |
 | `ansible-run.yml` | Run Ansible playbook |
+| `ansible-auto.yml` | Automated Ansible execution workflow |
 
 ## Actions
 
@@ -23,7 +32,7 @@ Reusable GitHub Actions workflows and composite actions for glitchedmob infrastr
 
 ## Usage
 
-Reference from other repos. Consumer repos handle their own change detection:
+Reference these workflows from consumer repositories. Consumer repos handle their own change detection:
 
 ```yaml
 # Consumer repo: .github/workflows/ci-pr.yml
