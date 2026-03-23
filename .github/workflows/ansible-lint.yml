@@ -25,8 +25,7 @@ jobs:
           key: ansible-collections-${{ runner.os }}-${{ hashFiles(format('{0}/requirements.yml', inputs.working-directory)) }}
 
       - name: Install deps
-        working-directory: ${{ inputs.working-directory }}
-        run: uv sync --locked
+        run: make ansible-install
 
       - name: Lint
         working-directory: ${{ inputs.working-directory }}
