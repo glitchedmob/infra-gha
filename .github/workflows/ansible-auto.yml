@@ -40,6 +40,8 @@ jobs:
       - name: Get changed files
         id: changed-files
         uses: tj-actions/changed-files@v45
+        with:
+          separator: "\n"
 
       - name: Detect playbooks to run
         id: detect
@@ -49,11 +51,12 @@ jobs:
         run: |
           set -euo pipefail
           to_run=()
+          changed_files="$ALL_CHANGED_FILES"
 
           while IFS= read -r playbook; do
             patterns=$(echo "$TRIGGER_MAP" | jq -r ".[\"$playbook\"][]")
             for pattern in $patterns; do
-              if echo "$ALL_CHANGED_FILES" | grep -q "^${pattern}"; then
+              if printf '%s\n' "$changed_files" | grep -q "^${pattern}"; then
                 to_run+=("$playbook")
                 break
               fi
@@ -99,6 +102,18 @@ jobs:
           } >> "$GITHUB_ENV"
           : > "$output_dir/ansible-logs.txt"
           : > "$output_dir/ansible-status.txt"
+
+      - name: Check encryption key
+        if: ${{ steps.detect.outputs.playbooks != '[]' }}
+        id: check-key
+        env:
+          KEY: ${{ secrets.output_encryption_key }}
+        run: |
+          if [ -n "${KEY:-}" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Run affected playbooks
         if: ${{ steps.detect.outputs.playbooks != '[]' }}
@@ -152,11 +167,15 @@ jobs:
           done < <(jq -r '.[]' <<< "$playbooks_json")
 
       - name: Encrypt output
-        if: ${{ always() && steps.detect.outputs.playbooks != '[]' && secrets.output_encryption_key != '' }}
+        if: ${{ always() && steps.detect.outputs.playbooks != '[]' }}
         env:
           KEY: ${{ secrets.output_encryption_key }}
         run: |
           set -euo pipefail
+          if [ -z "${KEY:-}" ]; then
+            echo "No output_encryption_key secret provided, skipping encryption"
+            exit 0
+          fi
           while IFS= read -r log_path; do
             [ -n "$log_path" ] || continue
             openssl enc -aes-256-cbc -pbkdf2 -salt \
@@ -166,7 +185,7 @@ jobs:
           done < "$ANSIBLE_LOG_MANIFEST"
 
       - name: Upload encrypted artifacts
-        if: ${{ always() && steps.detect.outputs.playbooks != '[]' && secrets.output_encryption_key != '' }}
+        if: ${{ always() && steps.detect.outputs.playbooks != '[]' && steps.check-key.outputs.has_key == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: ansible-output
