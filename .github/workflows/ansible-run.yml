@@ -96,6 +96,17 @@ jobs:
           : > "$output_dir/ansible-logs.txt"
           : > "$output_dir/ansible-status.txt"
 
+      - name: Check encryption key
+        id: check-key
+        env:
+          KEY: ${{ secrets.output_encryption_key }}
+        run: |
+          if [ -n "${KEY:-}" ]; then
+            echo "has_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_key=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Run playbook
         env:
           ANSIBLE_STDOUT_CALLBACK: community.general.diy
@@ -144,7 +155,7 @@ jobs:
           fi
 
       - name: Encrypt output
-        if: ${{ always() && secrets.output_encryption_key != '' }}
+        if: ${{ always() && steps.check-key.outputs.has_key == 'true' }}
         env:
           KEY: ${{ secrets.output_encryption_key }}
         run: |
@@ -158,7 +169,7 @@ jobs:
           done < "$ANSIBLE_LOG_MANIFEST"
 
       - name: Upload encrypted artifacts
-        if: ${{ always() && secrets.output_encryption_key != '' }}
+        if: ${{ always() && steps.check-key.outputs.has_key == 'true' }}
         uses: actions/upload-artifact@v7
         with:
           name: ansible-output-${{ inputs.playbook }}
@@ -213,7 +224,7 @@ jobs:
             fi
             echo "\`\`\`"
             echo "</details>"
-            if [ "${{ secrets.output_encryption_key }}" != "" ]; then
+            if [ "${{ steps.check-key.outputs.has_key }}" = "true" ]; then
               log_name="ansible-$playbook_slug.txt"
               echo ""
               echo "Artifacts: $artifacts_url"
