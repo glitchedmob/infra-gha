@@ -10,7 +10,6 @@ Reusable GitHub Actions workflows and composite actions for glitchedmob infrastr
 | `tf-plan-apply.yml` | Plan and optionally apply Terraform |
 | `ansible-lint.yml` | Lint Ansible playbooks |
 | `ansible-run.yml` | Run Ansible playbook |
-| `flux-diff.yml` | Diff Flux kustomizations (SSM SSH key + SSH tunnel) |
 
 ## Actions
 
