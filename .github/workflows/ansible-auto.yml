@@ -11,23 +11,31 @@ on:
         description: 'JSON mapping of playbook to file path prefixes. Example: {"apply.yml": ["playbooks/apply.yml", "playbooks/manifests"]}'
         required: true
         type: string
+    secrets:
       envrc_content:
         description: Content to write to .envrc file (optional)
         required: false
-        type: string
-        default: ""
+      output_encryption_key:
+        description: Key for encrypting output artifacts
+        required: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 2
 
       - name: Write .envrc
-        if: ${{ inputs.envrc_content != '' }}
-        run: echo "${{ inputs.envrc_content }}" > .envrc
+        env:
+          ENVRC_CONTENT: ${{ secrets.envrc_content }}
+        run: |
+          if [ -n "$ENVRC_CONTENT" ]; then
+            echo "$ENVRC_CONTENT" > .envrc
+          fi
 
       - name: Detect changed files
         id: detect
@@ -57,7 +65,8 @@ jobs:
           fi
 
       - name: Log affected playbooks
-        run: echo "Affected playbooks: ${{ steps.detect.outputs.playbooks }}"
+        run: |
+          echo "Affected playbooks: ${{ steps.detect.outputs.playbooks }}"
 
       - uses: astral-sh/setup-uv@v7
         if: ${{ steps.detect.outputs.playbooks != '[]' }}
@@ -75,12 +84,160 @@ jobs:
         if: ${{ steps.detect.outputs.playbooks != '[]' }}
         run: make ansible-install
 
-      - name: Run affected playbooks
+      - name: Prepare output directory
         if: ${{ steps.detect.outputs.playbooks != '[]' }}
         run: |
+          output_dir="$RUNNER_TEMP/output"
+          mkdir -p "$output_dir"
+          {
+            echo "OUTPUT_ARTIFACT_DIR=$output_dir"
+            echo "ANSIBLE_LOG_MANIFEST=$output_dir/ansible-logs.txt"
+            echo "ANSIBLE_STATUS_PATH=$output_dir/ansible-status.txt"
+          } >> "$GITHUB_ENV"
+          : > "$output_dir/ansible-logs.txt"
+          : > "$output_dir/ansible-status.txt"
+
+      - name: Run affected playbooks
+        if: ${{ steps.detect.outputs.playbooks != '[]' }}
+        env:
+          ANSIBLE_STDOUT_CALLBACK: community.general.diy
+          ANSIBLE_CALLBACKS_ENABLED: community.general.log_plays
+          ANSIBLE_CALLBACK_DIY_PLAYBOOK_ON_START_MSG: ""
+          ANSIBLE_CALLBACK_DIY_PLAYBOOK_ON_PLAY_START_MSG: ""
+          ANSIBLE_CALLBACK_DIY_PLAYBOOK_ON_SETUP_MSG: ""
+          ANSIBLE_CALLBACK_DIY_PLAYBOOK_ON_INCLUDE_MSG: ""
+          ANSIBLE_CALLBACK_DIY_PLAYBOOK_ON_NOTIFY_MSG: ""
+          ANSIBLE_CALLBACK_DIY_PLAYBOOK_ON_NO_HOSTS_MATCHED_MSG: ""
+          ANSIBLE_CALLBACK_DIY_PLAYBOOK_ON_NO_HOSTS_REMAINING_MSG: ""
+          ANSIBLE_CALLBACK_DIY_PLAYBOOK_ON_STATS_MSG: ""
+          ANSIBLE_CALLBACK_DIY_PLAYBOOK_ON_HANDLER_TASK_START_MSG: "TASK [{{ ansible_callback_diy.task.name }}]"
+          ANSIBLE_CALLBACK_DIY_PLAYBOOK_ON_TASK_START_MSG: "TASK [{{ ansible_callback_diy.task.name }}]"
+          ANSIBLE_CALLBACK_DIY_RUNNER_ON_OK_MSG: "{{ 'changed' if ansible_callback_diy.result.is_changed else 'ok' }}: [{{ ansible_callback_diy.result.host.name if ansible_callback_diy.result.host is not none else 'unknown' }}]"
+          ANSIBLE_CALLBACK_DIY_RUNNER_ON_SKIPPED_MSG: "skipped: [{{ ansible_callback_diy.result.host.name if ansible_callback_diy.result.host is not none else 'unknown' }}]"
+          ANSIBLE_CALLBACK_DIY_RUNNER_ON_FAILED_MSG: "failed: [{{ ansible_callback_diy.result.host.name if ansible_callback_diy.result.host is not none else 'unknown' }}]"
+          ANSIBLE_CALLBACK_DIY_RUNNER_ON_UNREACHABLE_MSG: "unreachable: [{{ ansible_callback_diy.result.host.name if ansible_callback_diy.result.host is not none else 'unknown' }}]"
+          ANSIBLE_CALLBACK_DIY_RUNNER_ON_NO_HOSTS_MSG: ""
+          ANSIBLE_CALLBACK_DIY_RUNNER_ON_START_MSG: ""
+        run: |
           set -euo pipefail
-          echo '${{ steps.detect.outputs.playbooks }}' | jq -r '.[]' | while read -r playbook; do
-            echo "::group::Running $playbook"
-            make ansible PLAYBOOK="$playbook"
-            echo "::endgroup::"
-          done
+          playbooks_json='${{ steps.detect.outputs.playbooks }}'
+
+          while IFS= read -r playbook; do
+            playbook_slug=$(printf '%s' "$playbook" | tr '/.' '__')
+            log_path="$OUTPUT_ARTIFACT_DIR/ansible-$playbook_slug.txt"
+            host_log_dir="$OUTPUT_ARTIFACT_DIR/ansible-$playbook_slug-hosts"
+            summary_path="$OUTPUT_ARTIFACT_DIR/ansible-$playbook_slug-summary.txt"
+            mkdir -p "$host_log_dir"
+            echo "$log_path" >> "$ANSIBLE_LOG_MANIFEST"
+            status=0
+            set +e
+            ANSIBLE_LOG_FOLDER="$host_log_dir" ANSIBLE_NOCOLOR=1 make ansible PLAYBOOK="$playbook" 2>&1 | tee "$summary_path"
+            status=${PIPESTATUS[0]}
+            set -e
+            printf '===== Ansible playbook: %s =====\n' "$playbook" > "$log_path"
+            shopt -s nullglob
+            for host_log in "$host_log_dir"/*; do
+              [ -f "$host_log" ] || continue
+              printf -- '----- Host: %s -----\n' "$(basename "$host_log")" >> "$log_path"
+              cat "$host_log" >> "$log_path"
+            done
+            shopt -u nullglob
+            printf '%s|%s\n' "$playbook" "$status" >> "$ANSIBLE_STATUS_PATH"
+            if [ "$status" -ne 0 ]; then
+              exit "$status"
+            fi
+          done < <(jq -r '.[]' <<< "$playbooks_json")
+
+      - name: Encrypt output
+        if: ${{ always() && steps.detect.outputs.playbooks != '[]' && secrets.output_encryption_key != '' }}
+        env:
+          KEY: ${{ secrets.output_encryption_key }}
+        run: |
+          set -euo pipefail
+          while IFS= read -r log_path; do
+            [ -n "$log_path" ] || continue
+            openssl enc -aes-256-cbc -pbkdf2 -salt \
+              -in "$log_path" \
+              -out "$log_path.enc" \
+              -pass "pass:${KEY}"
+          done < "$ANSIBLE_LOG_MANIFEST"
+
+      - name: Upload encrypted artifacts
+        if: ${{ always() && steps.detect.outputs.playbooks != '[]' && secrets.output_encryption_key != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: ansible-output
+          path: |
+            ${{ env.OUTPUT_ARTIFACT_DIR }}/ansible-*.txt.enc
+          if-no-files-found: ignore
+
+      - name: Publish results summary
+        if: ${{ always() && steps.detect.outputs.playbooks != '[]' }}
+        run: |
+          set -euo pipefail
+          playbooks_json='${{ steps.detect.outputs.playbooks }}'
+
+          status_data=""
+          if [ -f "$ANSIBLE_STATUS_PATH" ]; then
+            status_data=$(cat "$ANSIBLE_STATUS_PATH")
+          fi
+
+          artifacts_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          {
+            echo "## Ansible results"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          while IFS= read -r playbook; do
+            playbook_slug=$(printf '%s' "$playbook" | tr '/.' '__')
+            summary_path="$OUTPUT_ARTIFACT_DIR/ansible-$playbook_slug-summary.txt"
+            status="unknown"
+
+            if [ -n "$status_data" ]; then
+              while IFS='|' read -r status_playbook status_code; do
+                [ -n "$status_playbook" ] || continue
+                if [ "$status_playbook" = "$playbook" ]; then
+                  status="$status_code"
+                  break
+                fi
+              done <<< "$status_data"
+            fi
+
+            emoji="⚠️"
+            label="unknown"
+            if [ "$status" = "0" ]; then
+              emoji="✅"
+              label="success"
+            elif [ "$status" != "unknown" ]; then
+              emoji="❌"
+              label="failed"
+            fi
+
+            log_name="ansible-$playbook_slug.txt"
+
+            {
+              echo "- $emoji \`$playbook\` ($label)"
+              echo ""
+              echo "<details>"
+              echo "<summary>Logs: $playbook</summary>"
+              echo ""
+              echo "\`\`\`"
+              if [ -f "$summary_path" ]; then
+                cat "$summary_path"
+              else
+                echo "No Ansible summary output found for $playbook."
+              fi
+              echo "\`\`\`"
+              echo "</details>"
+              if [ "${{ secrets.output_encryption_key }}" != "" ]; then
+                echo "Artifacts: $artifacts_url"
+                echo "Decrypt artifact: \`openssl enc -d -aes-256-cbc -pbkdf2 -in $log_name.enc -out $log_name -pass pass:\$OUTPUT_ENCRYPTION_KEY\`"
+              fi
+              echo ""
+            } >> "$GITHUB_STEP_SUMMARY"
+          done < <(jq -r '.[]' <<< "$playbooks_json")
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -f "$ANSIBLE_PRIVATE_KEY_FILE" "$ANSIBLE_VAULT_PASSWORD_FILE" || true
