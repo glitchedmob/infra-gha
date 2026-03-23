@@ -1,0 +1,60 @@
+name: Headscale Connect
+description: Optionally connect runner to Headscale using auth key
+inputs:
+  headscale-login-server:
+    description: Headscale login server URL
+    required: false
+    default: ""
+  headscale-auth-key:
+    description: Headscale auth key
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Validate Headscale config
+      id: config
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        login_server="${{ inputs.headscale-login-server }}"
+        auth_key="${{ inputs.headscale-auth-key }}"
+
+        if [ -z "$login_server" ] && [ -z "$auth_key" ]; then
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        if [ -z "$login_server" ]; then
+          echo "::error::headscale-auth-key is set but headscale-login-server is empty."
+          exit 1
+        fi
+
+        if [ -z "$auth_key" ]; then
+          echo "::error::headscale-login-server is set but headscale-auth-key is empty."
+          exit 1
+        fi
+
+        echo "enabled=true" >> "$GITHUB_OUTPUT"
+
+    - name: Export Headscale auth key
+      if: ${{ steps.config.outputs.enabled == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        auth_key="${{ inputs.headscale-auth-key }}"
+        echo "::add-mask::$auth_key"
+        echo "HEADSCALE_AUTH_KEY=$auth_key" >> "$GITHUB_ENV"
+
+    - name: Connect to Headscale
+      if: ${{ steps.config.outputs.enabled == 'true' }}
+      uses: tailscale/github-action@v4
+      with:
+        authkey: ${{ env.HEADSCALE_AUTH_KEY }}
+        args: --login-server=${{ inputs.headscale-login-server }} --accept-routes
+
+    - name: Verify Headscale session
+      if: ${{ steps.config.outputs.enabled == 'true' }}
+      shell: bash
+      run: tailscale status
