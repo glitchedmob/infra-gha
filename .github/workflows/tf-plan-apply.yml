@@ -93,7 +93,7 @@ jobs:
           path: ~/.terraform.d/plugin-cache
           key: tofu-providers-${{ runner.os }}-${{ hashFiles(format('{0}/tf/.terraform.lock.hcl', inputs.repo-root)) }}
 
-      - uses: kishaningithub/setup-tf-summarize@v2
+      - uses: kishaningithub/setup-tf-summarize@v3
 
       - name: Init
         working-directory: ${{ inputs.repo-root }}
