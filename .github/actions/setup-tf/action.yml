@@ -15,7 +15,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: opentofu/setup-opentofu@v1
+    - uses: opentofu/setup-opentofu@v2
       with:
         tofu_version_file: ${{ inputs.working-directory }}/${{ inputs.tofu-version-file }}
 
@@ -30,5 +30,5 @@ runs:
         path: ~/.terraform.d/plugin-cache
         key: tofu-providers-${{ runner.os }}-${{ hashFiles(format('{0}/.terraform.lock.hcl', inputs.working-directory)) }}
 
-    - uses: kishaningithub/setup-tf-summarize@v2
+    - uses: kishaningithub/setup-tf-summarize@v3
       if: ${{ inputs.install-tf-summarize == 'true' }}
