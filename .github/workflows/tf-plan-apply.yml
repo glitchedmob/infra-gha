@@ -61,7 +61,7 @@ jobs:
     outputs:
       summary-path: ${{ steps.prepare-artifacts.outputs.summary-path }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Write .envrc
         env:
@@ -212,7 +212,7 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Write .envrc
         env:

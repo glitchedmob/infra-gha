@@ -76,7 +76,7 @@ jobs:
     env:
       AWS_ROLE_ARN: ${{ secrets.aws_role_arn }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Write .envrc
         env:
