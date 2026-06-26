@@ -12,14 +12,14 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           working-directory: ${{ inputs.working-directory }}
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: ${{ inputs.working-directory }}/collections
           key: ansible-collections-${{ runner.os }}-${{ hashFiles(format('{0}/requirements.yml', inputs.working-directory)) }}

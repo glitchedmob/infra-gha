@@ -76,7 +76,7 @@ jobs:
     env:
       AWS_ROLE_ARN: ${{ secrets.aws_role_arn }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Write .envrc
         env:
@@ -107,7 +107,7 @@ jobs:
           mkdir -p "$cache_dir"
           echo "TF_PLUGIN_CACHE_DIR=$cache_dir" >> "$GITHUB_ENV"
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         if: ${{ inputs.initialize-terraform }}
         with:
           path: ~/.terraform.d/plugin-cache
@@ -127,7 +127,7 @@ jobs:
           enable-cache: true
           working-directory: ${{ inputs.working-directory }}
 
-      - uses: actions/cache@v5
+      - uses: actions/cache@v6
         with:
           path: ${{ inputs.working-directory }}/collections
           key: ansible-collections-${{ runner.os }}-${{ hashFiles(format('{0}/requirements.yml', inputs.working-directory)) }}
