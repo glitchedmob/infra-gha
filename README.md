@@ -58,6 +58,6 @@ The workflow requires the target Kustomization to have exactly one matching exis
 
 ## Kubernetes Pull Request Checks
 
-`k8s-pr-checks.yml` discovers changed Kustomizations under configured roots and validates each affected render. It runs Kustomize, strict Kubeconform schema validation for built-in resources, and Pluto Kubernetes API deprecation checks. CRDs without published schemas are skipped by Kubeconform.
+`k8s-pr-checks.yml` discovers changed Kustomizations under configured roots and validates each affected render. It runs Kustomize, strict Kubeconform schema validation for built-in resources, KubeLinter best-practice checks, and Pluto Kubernetes API deprecation checks. CRDs without published schemas are skipped by Kubeconform.
 
-Callers can override the pinned Kustomize, Kubeconform, Pluto, and target Kubernetes versions. The Kubernetes version defaults to `1.35.0` and is shared by the schema and deprecation checks.
+Callers can override the pinned Kustomize, Kubeconform, KubeLinter, Pluto, and target Kubernetes versions. The Kubernetes version defaults to `1.35.0` and is shared by the schema and deprecation checks.

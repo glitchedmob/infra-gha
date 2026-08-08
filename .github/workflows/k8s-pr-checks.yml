@@ -25,6 +25,10 @@ on:
         description: Kubeconform version used to validate rendered manifests
         type: string
         default: v0.8.0
+      kube-linter-version:
+        description: KubeLinter version used to check rendered manifests
+        type: string
+        default: v0.8.3
       pluto-version:
         description: Pluto version used to detect deprecated Kubernetes APIs
         type: string
@@ -91,6 +95,14 @@ jobs:
           tag: ${{ inputs.kubeconform-version }}
           cache: enable
 
+      - name: Set up KubeLinter
+        if: ${{ !matrix.deleted }}
+        uses: jaxxstorm/action-install-gh-release@v2.1.0
+        with:
+          repo: stackrox/kube-linter
+          tag: ${{ inputs.kube-linter-version }}
+          cache: enable
+
       - name: Set up Pluto
         if: ${{ !matrix.deleted }}
         uses: jaxxstorm/action-install-gh-release@v2.1.0
@@ -116,6 +128,10 @@ jobs:
             -ignore-missing-schemas \
             -kubernetes-version "${KUBERNETES_VERSION#v}" \
             "$RUNNER_TEMP/rendered.yaml"
+
+      - name: Lint Kubernetes resources
+        if: ${{ !matrix.deleted }}
+        run: kube-linter lint "$RUNNER_TEMP/rendered.yaml"
 
       - name: Detect deprecated Kubernetes APIs
         if: ${{ !matrix.deleted }}
