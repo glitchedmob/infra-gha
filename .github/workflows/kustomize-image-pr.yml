@@ -194,8 +194,8 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          user_id=$(gh api "/users/$APP_SLUG%5Bbot%5D" --jq .id)
-          echo "value=$APP_SLUG[bot] <$user_id+$APP_SLUG[bot]@users.noreply.github.com>" >> "$GITHUB_OUTPUT"
+          user_id=$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)
+          echo "value=${APP_SLUG}[bot] <${user_id}+${APP_SLUG}[bot]@users.noreply.github.com>" >> "$GITHUB_OUTPUT"
 
       - name: Create or update pull request
         if: ${{ steps.update-image.outputs.changes-detected == 'true' }}
