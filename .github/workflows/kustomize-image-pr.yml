@@ -44,7 +44,7 @@ on:
         type: string
         default: ""
       auto-merge:
-        description: Enable auto-merge after creating or updating the pull request
+        description: Merge the pull request, using auto-merge when available
         required: false
         type: boolean
         default: false
@@ -215,7 +215,7 @@ jobs:
           title: "chore(deps): update ${{ inputs.image }} to ${{ inputs.image-tag }} in ${{ steps.update-image.outputs.promotion-id }}"
           body-path: ${{ steps.changelog.outputs.body-path }}
 
-      - name: Enable auto-merge
+      - name: Merge pull request
         if: ${{ inputs.auto-merge && steps.pull-request.outputs.pull-request-url != '' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -223,7 +223,10 @@ jobs:
           PULL_REQUEST_URL: ${{ steps.pull-request.outputs.pull-request-url }}
         run: |
           set -euo pipefail
-          gh pr merge "$PULL_REQUEST_URL" --auto "--$MERGE_METHOD"
+          if ! gh pr merge "$PULL_REQUEST_URL" --auto "--$MERGE_METHOD"; then
+            echo "::warning::Auto-merge is unavailable; attempting an immediate merge"
+            gh pr merge "$PULL_REQUEST_URL" "--$MERGE_METHOD"
+          fi
 
       - name: Add workflow summary
         if: ${{ always() }}
