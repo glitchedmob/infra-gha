@@ -27,8 +27,7 @@ jobs:
         with:
           # GitHub documents these reusable-workflow contexts, but the latest
           # actionlint release predates them.
-          flags: >-
-            -ignore 'property "workflow_(repository|sha)" is not defined'
+          flags: -ignore workflow_(repository|sha).*not.defined
 
       - name: Validate workflow scripts
         run: |
