@@ -54,4 +54,4 @@ jobs:
       github-app-private-key: ${{ secrets.INFRA_AUTOMATION_APP_PRIVATE_KEY }}
 ```
 
-The workflow requires the target Kustomization to have exactly one matching existing `newTag`. It does not add missing image declarations or modify image names. `auto-merge` requires auto-merge to be enabled in the deployment repository.
+The workflow requires the target Kustomization to have exactly one matching existing `newTag`. It does not add missing image declarations or modify image names. When `auto-merge` is enabled, the workflow requests auto-merge and falls back to an immediate merge if auto-merge is unavailable. Pull requests are always squash merged.

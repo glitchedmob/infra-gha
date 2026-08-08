@@ -44,15 +44,10 @@ on:
         type: string
         default: ""
       auto-merge:
-        description: Enable auto-merge after creating or updating the pull request
+        description: Merge the pull request, using auto-merge when available
         required: false
         type: boolean
         default: false
-      merge-method:
-        description: Auto-merge method (squash, merge, or rebase)
-        required: false
-        type: string
-        default: squash
       github-app-id:
         description: ID of a GitHub App installed on the deployment repository
         required: true
@@ -157,7 +152,6 @@ jobs:
           IMAGE: ${{ inputs.image }}
           IMAGE_TAG: ${{ inputs.image-tag }}
           KUSTOMIZATION_PATH: ${{ inputs.kustomization-path }}
-          MERGE_METHOD: ${{ inputs.merge-method }}
           PROMOTION_ID: ${{ inputs.promotion-id }}
         run: bash "$GITHUB_WORKSPACE/workflow/.github/scripts/update-kustomize-image.sh"
 
@@ -209,21 +203,23 @@ jobs:
           branch: ${{ steps.update-image.outputs.branch }}
           delete-branch: true
           sign-commits: true
-          commit-message: "chore(deps): update ${{ inputs.image }} to ${{ inputs.image-tag }}"
+          commit-message: "chore: update ${{ steps.update-image.outputs.image-name }} ${{ steps.update-image.outputs.promotion-id }} to v${{ inputs.image-tag }} [AUTOMATION]"
           committer: ${{ steps.app-identity.outputs.value }}
           author: ${{ steps.app-identity.outputs.value }}
-          title: "chore(deps): update ${{ inputs.image }} to ${{ inputs.image-tag }} in ${{ steps.update-image.outputs.promotion-id }}"
+          title: "chore: update ${{ steps.update-image.outputs.image-name }} ${{ steps.update-image.outputs.promotion-id }} to v${{ inputs.image-tag }} [AUTOMATION]"
           body-path: ${{ steps.changelog.outputs.body-path }}
 
-      - name: Enable auto-merge
+      - name: Merge pull request
         if: ${{ inputs.auto-merge && steps.pull-request.outputs.pull-request-url != '' }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          MERGE_METHOD: ${{ inputs.merge-method }}
           PULL_REQUEST_URL: ${{ steps.pull-request.outputs.pull-request-url }}
         run: |
           set -euo pipefail
-          gh pr merge "$PULL_REQUEST_URL" --auto "--$MERGE_METHOD"
+          if ! gh pr merge "$PULL_REQUEST_URL" --auto --squash; then
+            echo "::warning::Auto-merge is unavailable; attempting an immediate merge"
+            gh pr merge "$PULL_REQUEST_URL" --squash
+          fi
 
       - name: Add workflow summary
         if: ${{ always() }}

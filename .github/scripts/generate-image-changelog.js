@@ -12,13 +12,9 @@ module.exports = async ({ github, core }) => {
   const head = process.env.SOURCE_REF.replace(/^refs\/tags\//, "");
   const compareUrl = `https://github.com/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
   const lines = [
-    "## Image update",
+    `Updates \`${process.env.IMAGE}\` from \`${process.env.OLD_IMAGE_TAG}\` to \`${process.env.IMAGE_TAG}\` in \`${process.env.KUSTOMIZATION_PATH}\`.`,
     "",
-    `\`${process.env.IMAGE}:${process.env.OLD_IMAGE_TAG}\` -> \`${process.env.IMAGE}:${process.env.IMAGE_TAG}\``,
-    "",
-    `Kustomization: \`${process.env.KUSTOMIZATION_PATH}\``,
-    "",
-    "## Changes",
+    "**Changes**",
     "",
     `[Compare ${base}...${head}](${compareUrl})`,
     "",
@@ -65,28 +61,26 @@ module.exports = async ({ github, core }) => {
           core.warning(`Unable to find a pull request for ${commit.sha}: ${error.message}`);
         }
 
-        const subject = commit.commit.message
-          .split("\n", 1)[0]
+        let subject = commit.commit.message.split("\n", 1)[0];
+        if (pullRequest) {
+          subject = subject.replace(new RegExp(`\\s*\\(#${pullRequest.number}\\)$`), "");
+        }
+        subject = subject
           .replace(/\[/g, "\\[")
           .replace(/\]/g, "\\]");
         const shortSha = commit.sha.slice(0, 7);
         const commitLink =
           "[`" + shortSha + "`](https://github.com/" + owner + "/" + repo + "/commit/" + commit.sha + ")";
         const prLink = pullRequest ? ` ([#${pullRequest.number}](${pullRequest.html_url}))` : "";
-        lines.push(`- ${commitLink} ${subject}${prLink}`);
+        const author = pullRequest?.user?.login ?? commit.author?.login ?? commit.committer?.login;
+        const attribution = author ? ` by @${author}` : "";
+        lines.push(`- ${commitLink} ${subject}${prLink}${attribution}`);
       }
     }
   } catch (error) {
     core.warning(`Unable to generate the release changelog: ${error.message}`);
     lines.push(`> Changelog unavailable: ${error.message}`);
   }
-
-  lines.push(
-    "",
-    "---",
-    "",
-    `Generated from [${owner}/${repo}@${head}](https://github.com/${owner}/${repo}/tree/${encodeURIComponent(head)}).`,
-  );
 
   const bodyPath = path.join(process.env.RUNNER_TEMP, "kustomize-image-pr.md");
   fs.writeFileSync(bodyPath, `${lines.join("\n")}\n`);
