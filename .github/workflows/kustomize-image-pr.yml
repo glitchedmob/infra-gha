@@ -1,0 +1,251 @@
+name: Kustomize Image PR
+
+on:
+  workflow_call:
+    inputs:
+      deployment-repository:
+        description: Repository containing the Kustomization, in owner/repo form
+        required: true
+        type: string
+      deployment-branch:
+        description: Base branch for the pull request
+        required: false
+        type: string
+        default: main
+      kustomization-path:
+        description: Path to the Kustomization directory in the deployment repository
+        required: true
+        type: string
+      image:
+        description: Image name from the Kustomization images list
+        required: true
+        type: string
+      image-tag:
+        description: New image tag
+        required: true
+        type: string
+      source-repository:
+        description: Repository containing the release commits; defaults to the caller repository
+        required: false
+        type: string
+        default: ""
+      source-ref:
+        description: Git ref for the new release, such as v1.2.3
+        required: true
+        type: string
+      source-tag-prefix:
+        description: Prefix mapping the previous image tag to a source Git ref
+        required: false
+        type: string
+        default: v
+      promotion-id:
+        description: Stable identifier used in the branch name; defaults to the Kustomization path
+        required: false
+        type: string
+        default: ""
+      auto-merge:
+        description: Enable auto-merge after creating or updating the pull request
+        required: false
+        type: boolean
+        default: false
+      merge-method:
+        description: Auto-merge method (squash, merge, or rebase)
+        required: false
+        type: string
+        default: squash
+      github-app-id:
+        description: ID of a GitHub App installed on the deployment repository
+        required: true
+        type: string
+      kustomize-version:
+        description: Kustomize version used to edit and validate the target
+        required: false
+        type: string
+        default: 5.7.1
+    secrets:
+      github-app-private-key:
+        description: Private key for the GitHub App
+        required: true
+    outputs:
+      pull-request-number:
+        description: Number of the created or updated pull request
+        value: ${{ jobs.update.outputs.pull-request-number }}
+      pull-request-url:
+        description: URL of the created or updated pull request
+        value: ${{ jobs.update.outputs.pull-request-url }}
+      pull-request-created:
+        description: Whether this invocation created a new pull request
+        value: ${{ jobs.update.outputs.pull-request-created }}
+      changes-detected:
+        description: Whether the requested image tag differs from the base branch
+        value: ${{ jobs.update.outputs.changes-detected }}
+      previous-image-tag:
+        description: Image tag found in the target before the update
+        value: ${{ jobs.update.outputs.previous-image-tag }}
+
+jobs:
+  update:
+    name: Update ${{ inputs.kustomization-path }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    concurrency:
+      group: kustomize-image-pr-${{ inputs.deployment-repository }}-${{ inputs.kustomization-path }}
+      cancel-in-progress: false
+    outputs:
+      pull-request-number: ${{ steps.pull-request.outputs.pull-request-number }}
+      pull-request-url: ${{ steps.pull-request.outputs.pull-request-url }}
+      pull-request-created: ${{ steps.pull-request.outputs.pull-request-operation == 'created' }}
+      changes-detected: ${{ steps.update-image.outputs.changes-detected }}
+      previous-image-tag: ${{ steps.update-image.outputs.previous-image-tag }}
+    steps:
+      - name: Check out workflow scripts
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: workflow
+          persist-credentials: false
+
+      - name: Validate repository input
+        id: repository
+        env:
+          DEPLOYMENT_REPOSITORY: ${{ inputs.deployment-repository }}
+        run: |
+          set -euo pipefail
+
+          owner=${DEPLOYMENT_REPOSITORY%%/*}
+          repository=${DEPLOYMENT_REPOSITORY#*/}
+          if [ -z "$owner" ] || [ -z "$repository" ] || [ "$owner" = "$repository" ] || [[ "$repository" == */* ]]; then
+            echo "deployment-repository must use owner/repo format" >&2
+            exit 1
+          fi
+
+          echo "owner=$owner" >> "$GITHUB_OUTPUT"
+          echo "repository=$repository" >> "$GITHUB_OUTPUT"
+
+      - name: Create deployment repository token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ inputs.github-app-id }}
+          private-key: ${{ secrets.github-app-private-key }}
+          owner: ${{ steps.repository.outputs.owner }}
+          repositories: ${{ steps.repository.outputs.repository }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Check out deployment repository
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.deployment-repository }}
+          ref: ${{ inputs.deployment-branch }}
+          token: ${{ steps.app-token.outputs.token }}
+          path: deployment
+          persist-credentials: false
+
+      - name: Set up Kustomize
+        uses: imranismail/setup-kustomize@v2
+        with:
+          kustomize-version: ${{ inputs.kustomize-version }}
+
+      - name: Update image tag
+        id: update-image
+        working-directory: deployment
+        env:
+          IMAGE: ${{ inputs.image }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          KUSTOMIZATION_PATH: ${{ inputs.kustomization-path }}
+          MERGE_METHOD: ${{ inputs.merge-method }}
+          PROMOTION_ID: ${{ inputs.promotion-id }}
+        run: bash "$GITHUB_WORKSPACE/workflow/.github/scripts/update-kustomize-image.sh"
+
+      - name: Validate rendered manifests
+        if: ${{ steps.update-image.outputs.changes-detected == 'true' }}
+        working-directory: deployment
+        env:
+          KUSTOMIZATION_PATH: ${{ inputs.kustomization-path }}
+        run: kustomize build "$KUSTOMIZATION_PATH" > /dev/null
+
+      - name: Generate pull request body
+        if: ${{ steps.update-image.outputs.changes-detected == 'true' }}
+        id: changelog
+        uses: actions/github-script@v9
+        env:
+          IMAGE: ${{ inputs.image }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          KUSTOMIZATION_PATH: ${{ inputs.kustomization-path }}
+          OLD_IMAGE_TAG: ${{ steps.update-image.outputs.previous-image-tag }}
+          SOURCE_REF: ${{ inputs.source-ref }}
+          SOURCE_REPOSITORY: ${{ inputs.source-repository || github.repository }}
+          SOURCE_TAG_PREFIX: ${{ inputs.source-tag-prefix }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const generateChangelog = require(`${process.env.GITHUB_WORKSPACE}/workflow/.github/scripts/generate-image-changelog.js`);
+            await generateChangelog({ github, core });
+
+      - name: Get GitHub App identity
+        if: ${{ steps.update-image.outputs.changes-detected == 'true' }}
+        id: app-identity
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          user_id=$(gh api "/users/${APP_SLUG}%5Bbot%5D" --jq .id)
+          echo "value=${APP_SLUG}[bot] <${user_id}+${APP_SLUG}[bot]@users.noreply.github.com>" >> "$GITHUB_OUTPUT"
+
+      - name: Create or update pull request
+        if: ${{ steps.update-image.outputs.changes-detected == 'true' }}
+        id: pull-request
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          path: deployment
+          add-paths: ${{ steps.update-image.outputs.kustomization-file }}
+          base: ${{ inputs.deployment-branch }}
+          branch: ${{ steps.update-image.outputs.branch }}
+          delete-branch: true
+          sign-commits: true
+          commit-message: "chore(deps): update ${{ inputs.image }} to ${{ inputs.image-tag }}"
+          committer: ${{ steps.app-identity.outputs.value }}
+          author: ${{ steps.app-identity.outputs.value }}
+          title: "chore(deps): update ${{ inputs.image }} to ${{ inputs.image-tag }} in ${{ steps.update-image.outputs.promotion-id }}"
+          body-path: ${{ steps.changelog.outputs.body-path }}
+
+      - name: Enable auto-merge
+        if: ${{ inputs.auto-merge && steps.pull-request.outputs.pull-request-url != '' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          MERGE_METHOD: ${{ inputs.merge-method }}
+          PULL_REQUEST_URL: ${{ steps.pull-request.outputs.pull-request-url }}
+        run: |
+          set -euo pipefail
+          gh pr merge "$PULL_REQUEST_URL" --auto "--$MERGE_METHOD"
+
+      - name: Add workflow summary
+        if: ${{ always() }}
+        env:
+          CHANGES_DETECTED: ${{ steps.update-image.outputs.changes-detected }}
+          IMAGE: ${{ inputs.image }}
+          IMAGE_TAG: ${{ inputs.image-tag }}
+          PREVIOUS_IMAGE_TAG: ${{ steps.update-image.outputs.previous-image-tag }}
+          PULL_REQUEST_OPERATION: ${{ steps.pull-request.outputs.pull-request-operation }}
+          PULL_REQUEST_URL: ${{ steps.pull-request.outputs.pull-request-url }}
+          TARGET: ${{ inputs.kustomization-path }}
+        run: |
+          {
+            echo "## Kustomize image promotion"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Target | \`$TARGET\` |"
+            echo "| Image | \`$IMAGE\` |"
+            echo "| Version | \`${PREVIOUS_IMAGE_TAG:-unknown}\` -> \`$IMAGE_TAG\` |"
+            echo "| Changes detected | \`${CHANGES_DETECTED:-false}\` |"
+            if [ -n "$PULL_REQUEST_URL" ]; then
+              echo "| Pull request | [$PULL_REQUEST_OPERATION]($PULL_REQUEST_URL) |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
