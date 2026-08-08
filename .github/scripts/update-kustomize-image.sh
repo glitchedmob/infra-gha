@@ -6,13 +6,6 @@ if [[ ! "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
   echo "image-tag is not a valid OCI image tag" >&2
   exit 1
 fi
-case "$MERGE_METHOD" in
-  squash|merge|rebase) ;;
-  *)
-    echo "merge-method must be squash, merge, or rebase" >&2
-    exit 1
-    ;;
-esac
 case "$KUSTOMIZATION_PATH" in
   ""|/*|..|../*|*/..|*/../*)
     echo "kustomization-path must be a relative path within the deployment repository" >&2
@@ -98,6 +91,7 @@ fi
 
 {
   echo "branch=automation/images/$image_name/${identifier:0:100}"
+  echo "image-name=$image_name"
   echo "kustomization-file=$relative_file"
   echo "promotion-id=$identifier"
 } >> "$GITHUB_OUTPUT"
