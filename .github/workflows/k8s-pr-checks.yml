@@ -101,7 +101,8 @@ jobs:
         with:
           repo: stackrox/kube-linter
           tag: ${{ inputs.kube-linter-version }}
-          asset-name: kube-linter-linux.tar.gz
+          asset-name: kube-linter
+          arch: kube-linter
           cache: enable
 
       - name: Set up Pluto
