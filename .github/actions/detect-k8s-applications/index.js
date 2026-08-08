@@ -19,7 +19,7 @@ function normalizeRepoPath(value, label) {
     throw new Error(`${label} must be a repository-relative POSIX path`);
   }
 
-  const withoutTrailingSlash = value === "." ? value : value.replace(/\/+$/, "");
+  const withoutTrailingSlash = value.replace(/\/+$/, "");
   const normalized = path.posix.normalize(withoutTrailingSlash);
   if (normalized === ".." || normalized.startsWith("../")) {
     throw new Error(`${label} must not leave the repository`);
@@ -113,10 +113,9 @@ function isWithin(candidate, prefix) {
 }
 
 function mergeApplications(headConfig, baseConfig) {
-  const applications = new Map();
-  for (const application of baseConfig.applications) {
-    applications.set(application.name, { ...application, watch: [...application.watch], deleted: true });
-  }
+  const applications = new Map(
+    baseConfig.applications.map((application) => [application.name, { ...application, deleted: true }]),
+  );
   for (const application of headConfig.applications) {
     const previous = applications.get(application.name);
     applications.set(application.name, {
@@ -133,27 +132,12 @@ function detectApplications({ headConfig, baseConfig = emptyConfig(), changedPat
   const managedPaths = [...new Set([...baseConfig.managedPaths, ...headConfig.managedPaths])];
   const globalPaths = [...new Set([...baseConfig.globalPaths, ...headConfig.globalPaths])];
   const uniqueChangedPaths = [...new Set(changedPaths)].sort();
-  const reasons = new Map([...applications.keys()].map((name) => [name, new Set()]));
 
   const configChanged = uniqueChangedPaths.includes(configPath);
   const globalChanges = uniqueChangedPaths.filter((changedPath) =>
     globalPaths.some((globalPath) => isWithin(changedPath, globalPath)),
   );
   const selectAllReasons = configChanged ? [configPath, ...globalChanges] : globalChanges;
-
-  if (selectAllReasons.length > 0) {
-    for (const applicationReasons of reasons.values()) {
-      for (const reason of selectAllReasons) applicationReasons.add(reason);
-    }
-  } else {
-    for (const changedPath of uniqueChangedPaths) {
-      for (const application of applications.values()) {
-        if (application.watch.some((watchPath) => isWithin(changedPath, watchPath))) {
-          reasons.get(application.name).add(changedPath);
-        }
-      }
-    }
-  }
 
   const unmappedPaths = uniqueChangedPaths.filter((changedPath) => {
     if (changedPath === configPath) return false;
@@ -167,15 +151,25 @@ function detectApplications({ headConfig, baseConfig = emptyConfig(), changedPat
     throw new Error(`changed Kubernetes paths are not mapped to an application:\n${unmappedPaths.join("\n")}`);
   }
 
+  const allChangedPaths = [...new Set(selectAllReasons)].sort();
   const include = [...applications.values()]
-    .filter((application) => reasons.get(application.name).size > 0)
     .sort((left, right) => left.name.localeCompare(right.name))
-    .map((application) => ({
-      application: application.name,
-      kustomization: application.kustomization,
-      deleted: application.deleted,
-      changedPaths: [...reasons.get(application.name)].sort(),
-    }));
+    .map((application) => {
+      const applicationChangedPaths =
+        allChangedPaths.length > 0
+          ? allChangedPaths
+          : uniqueChangedPaths.filter((changedPath) =>
+              application.watch.some((watchPath) => isWithin(changedPath, watchPath)),
+            );
+      if (applicationChangedPaths.length === 0) return null;
+      return {
+        application: application.name,
+        kustomization: application.kustomization,
+        deleted: application.deleted,
+        changedPaths: applicationChangedPaths,
+      };
+    })
+    .filter(Boolean);
   if (include.length > 256) throw new Error("changed application matrix exceeds GitHub's 256-job limit");
 
   return {
@@ -295,10 +289,10 @@ function writeSummary(result) {
 
 function run() {
   const result = detectRepository({
-    cwd: process.env.REPOSITORY_PATH || process.env.GITHUB_WORKSPACE || process.cwd(),
-    configPath: process.env.APPLICATIONS_FILE,
-    baseRevision: process.env.BASE_REVISION,
-    headRevision: process.env.HEAD_REVISION,
+    cwd: process.env.GITHUB_WORKSPACE || process.cwd(),
+    configPath: process.env["INPUT_APPLICATIONS-FILE"],
+    baseRevision: process.env["INPUT_BASE-REVISION"],
+    headRevision: process.env["INPUT_HEAD-REVISION"],
   });
   const outputs = createWorkflowOutputs(result);
   writeOutput("matrix", outputs.matrix);
@@ -308,6 +302,7 @@ function run() {
 }
 
 module.exports = run;
+module.exports.run = run;
 module.exports.createWorkflowOutputs = createWorkflowOutputs;
 module.exports.detectApplications = detectApplications;
 module.exports.detectRepository = detectRepository;

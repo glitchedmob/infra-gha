@@ -25,9 +25,10 @@ jobs:
 
       - uses: raven-actions/actionlint@v2
         with:
-          # GitHub documents these reusable-workflow contexts, but the latest
-          # actionlint release predates them.
-          flags: -ignore workflow_(repository|sha).*not.defined
+          # The latest actionlint release predates these GitHub features.
+          flags: >-
+            -ignore
+            (workflow_(repository|sha).*not.defined|specifying.action.*detect-k8s-applications.*ref.is.missing)
 
       - name: Validate workflow scripts
         run: |

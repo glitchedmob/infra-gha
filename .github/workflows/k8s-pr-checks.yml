@@ -5,22 +5,16 @@ on:
     inputs:
       applications-file:
         description: Repository-relative path to the Kubernetes application inventory
-        required: false
         type: string
         default: .github/k8s-applications.json
       base-revision:
         description: Base Git revision; defaults to the pull request base
-        required: false
         type: string
-        default: ""
       head-revision:
         description: Head Git revision; defaults to the pull request head
-        required: false
         type: string
-        default: ""
       kustomize-version:
         description: Kustomize version used to render changed applications
-        required: false
         type: string
         default: 5.8.1
     outputs:
@@ -44,26 +38,16 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
-          path: repository
           persist-credentials: false
           ref: ${{ inputs.head-revision || github.event.pull_request.head.sha || github.sha }}
 
-      - name: Check out workflow scripts
-        uses: actions/checkout@v7
-        with:
-          repository: ${{ job.workflow_repository }}
-          ref: ${{ job.workflow_sha }}
-          path: workflow
-          persist-credentials: false
-
       - name: Detect changed applications
         id: detect
-        uses: ./workflow/.github/actions/detect-k8s-applications
+        uses: $/.github/actions/detect-k8s-applications
         with:
           applications-file: ${{ inputs.applications-file }}
           base-revision: ${{ inputs.base-revision || github.event.pull_request.base.sha || github.event.before }}
           head-revision: ${{ inputs.head-revision || github.event.pull_request.head.sha || github.sha }}
-          repository-path: ${{ github.workspace }}/repository
 
   render:
     name: Render ${{ matrix.application }}
@@ -75,9 +59,9 @@ jobs:
       matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
     steps:
       - name: Check out caller repository
+        if: ${{ !matrix.deleted }}
         uses: actions/checkout@v7
         with:
-          path: repository
           persist-credentials: false
           ref: ${{ inputs.head-revision || github.event.pull_request.head.sha || github.sha }}
 
@@ -91,7 +75,6 @@ jobs:
         if: ${{ !matrix.deleted }}
         env:
           KUSTOMIZATION_PATH: ${{ matrix.kustomization }}
-        working-directory: repository
         run: kustomize build "./$KUSTOMIZATION_PATH" > /dev/null
 
       - name: Record deleted application

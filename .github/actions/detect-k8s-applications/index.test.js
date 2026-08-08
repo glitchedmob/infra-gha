@@ -11,6 +11,7 @@ const {
   detectRepository,
   emptyConfig,
   parseConfig,
+  run,
 } = require("./index");
 
 function config({ applications, managedPaths = ["src/k8s"], globalPaths = [] }) {
@@ -147,33 +148,83 @@ function git(cwd, arguments_) {
   return result.stdout.trim();
 }
 
-test("repository detection maps both sides of a rename", (context) => {
+function writeInventory(repository, inventoryApplications) {
+  fs.mkdirSync(path.join(repository, ".github"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repository, ".github/k8s-applications.json"),
+    `${JSON.stringify({ version: 1, managedPaths: ["src/k8s"], applications: inventoryApplications }, null, 2)}\n`,
+  );
+}
+
+function commit(repository, message) {
+  git(repository, ["add", "-A"]);
+  git(repository, ["commit", "--quiet", "-m", message]);
+  return git(repository, ["rev-parse", "HEAD"]);
+}
+
+function createRepository(context, inventoryApplications, files) {
   const repository = fs.mkdtempSync(path.join(os.tmpdir(), "detect-k8s-applications-"));
   context.after(() => fs.rmSync(repository, { recursive: true, force: true }));
-
   git(repository, ["init", "--quiet"]);
   git(repository, ["config", "user.email", "test@example.com"]);
   git(repository, ["config", "user.name", "Test"]);
-  fs.mkdirSync(path.join(repository, ".github"), { recursive: true });
-  fs.mkdirSync(path.join(repository, "src/k8s/apps/example/production"), { recursive: true });
-  fs.mkdirSync(path.join(repository, "src/k8s/apps/example/staging"), { recursive: true });
+  writeInventory(repository, inventoryApplications);
+  for (const [file, contents] of Object.entries(files)) {
+    const target = path.join(repository, file);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, contents);
+  }
+  return { repository, baseRevision: commit(repository, "base") };
+}
+
+test("action reads inputs and writes workflow outputs", (context) => {
+  const { repository, baseRevision } = createRepository(context, applications, {
+    "src/k8s/apps/example/production/kustomization.yaml": "resources: []\n",
+  });
   fs.writeFileSync(
-    path.join(repository, ".github/k8s-applications.json"),
-    `${JSON.stringify({ version: 1, managedPaths: ["src/k8s"], applications }, null, 2)}\n`,
+    path.join(repository, "src/k8s/apps/example/production/kustomization.yaml"),
+    "resources:\n  - deployment.yaml\n",
   );
-  fs.writeFileSync(path.join(repository, "src/k8s/apps/example/production/configmap.yaml"), "value: old\n");
-  fs.writeFileSync(path.join(repository, "src/k8s/apps/example/staging/.gitkeep"), "");
-  git(repository, ["add", "."]);
-  git(repository, ["commit", "--quiet", "-m", "base"]);
-  const baseRevision = git(repository, ["rev-parse", "HEAD"]);
+  const headRevision = commit(repository, "change production");
+  const output = path.join(repository, "workflow-output");
+  const summary = path.join(repository, "workflow-summary");
+  const environment = {
+    GITHUB_OUTPUT: output,
+    GITHUB_STEP_SUMMARY: summary,
+    GITHUB_WORKSPACE: repository,
+    "INPUT_APPLICATIONS-FILE": ".github/k8s-applications.json",
+    "INPUT_BASE-REVISION": baseRevision,
+    "INPUT_HEAD-REVISION": headRevision,
+  };
+  const previousEnvironment = Object.fromEntries(
+    Object.keys(environment).map((name) => [name, process.env[name]]),
+  );
+  Object.assign(process.env, environment);
+  context.after(() => {
+    for (const [name, value] of Object.entries(previousEnvironment)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  run();
+
+  assert.match(fs.readFileSync(output, "utf8"), /applications=\["example-production"\]/);
+  assert.match(fs.readFileSync(output, "utf8"), /has-changes=true/);
+  assert.match(fs.readFileSync(summary, "utf8"), /Changed Kubernetes applications/);
+});
+
+test("repository detection maps both sides of a rename", (context) => {
+  const { repository, baseRevision } = createRepository(context, applications, {
+    "src/k8s/apps/example/production/configmap.yaml": "value: old\n",
+    "src/k8s/apps/example/staging/.gitkeep": "",
+  });
 
   fs.renameSync(
     path.join(repository, "src/k8s/apps/example/production/configmap.yaml"),
     path.join(repository, "src/k8s/apps/example/staging/configmap.yaml"),
   );
-  git(repository, ["add", "-A"]);
-  git(repository, ["commit", "--quiet", "-m", "rename"]);
-  const headRevision = git(repository, ["rev-parse", "HEAD"]);
+  const headRevision = commit(repository, "rename");
 
   const result = detectRepository({
     cwd: repository,
@@ -185,32 +236,13 @@ test("repository detection maps both sides of a rename", (context) => {
 });
 
 test("repository detection rejects removing checks for an existing Kustomization", (context) => {
-  const repository = fs.mkdtempSync(path.join(os.tmpdir(), "detect-k8s-applications-"));
-  context.after(() => fs.rmSync(repository, { recursive: true, force: true }));
+  const { repository, baseRevision } = createRepository(context, applications, {
+    "src/k8s/apps/example/production/kustomization.yaml": "resources: []\n",
+    "src/k8s/apps/example/staging/kustomization.yaml": "resources: []\n",
+  });
 
-  git(repository, ["init", "--quiet"]);
-  git(repository, ["config", "user.email", "test@example.com"]);
-  git(repository, ["config", "user.name", "Test"]);
-  fs.mkdirSync(path.join(repository, ".github"), { recursive: true });
-  fs.mkdirSync(path.join(repository, "src/k8s/apps/example/production"), { recursive: true });
-  fs.mkdirSync(path.join(repository, "src/k8s/apps/example/staging"), { recursive: true });
-  fs.writeFileSync(
-    path.join(repository, ".github/k8s-applications.json"),
-    `${JSON.stringify({ version: 1, managedPaths: ["src/k8s"], applications }, null, 2)}\n`,
-  );
-  fs.writeFileSync(path.join(repository, "src/k8s/apps/example/production/kustomization.yaml"), "resources: []\n");
-  fs.writeFileSync(path.join(repository, "src/k8s/apps/example/staging/kustomization.yaml"), "resources: []\n");
-  git(repository, ["add", "."]);
-  git(repository, ["commit", "--quiet", "-m", "base"]);
-  const baseRevision = git(repository, ["rev-parse", "HEAD"]);
-
-  fs.writeFileSync(
-    path.join(repository, ".github/k8s-applications.json"),
-    `${JSON.stringify({ version: 1, managedPaths: ["src/k8s"], applications: [applications[0]] }, null, 2)}\n`,
-  );
-  git(repository, ["add", "."]);
-  git(repository, ["commit", "--quiet", "-m", "remove inventory entry"]);
-  const headRevision = git(repository, ["rev-parse", "HEAD"]);
+  writeInventory(repository, [applications[0]]);
+  const headRevision = commit(repository, "remove inventory entry");
 
   assert.throws(
     () =>
@@ -224,9 +256,7 @@ test("repository detection rejects removing checks for an existing Kustomization
   );
 
   fs.rmSync(path.join(repository, "src/k8s/apps/example/staging"), { recursive: true });
-  git(repository, ["add", "-A"]);
-  git(repository, ["commit", "--quiet", "-m", "delete Kustomization"]);
-  const deletionRevision = git(repository, ["rev-parse", "HEAD"]);
+  const deletionRevision = commit(repository, "delete Kustomization");
   const deletion = detectRepository({
     cwd: repository,
     configPath: ".github/k8s-applications.json",
@@ -240,31 +270,13 @@ test("repository detection rejects removing checks for an existing Kustomization
 });
 
 test("repository detection permits renaming an application that keeps its Kustomization", (context) => {
-  const repository = fs.mkdtempSync(path.join(os.tmpdir(), "detect-k8s-applications-"));
-  context.after(() => fs.rmSync(repository, { recursive: true, force: true }));
-
-  git(repository, ["init", "--quiet"]);
-  git(repository, ["config", "user.email", "test@example.com"]);
-  git(repository, ["config", "user.name", "Test"]);
-  fs.mkdirSync(path.join(repository, ".github"), { recursive: true });
-  fs.mkdirSync(path.join(repository, "src/k8s/apps/example/production"), { recursive: true });
-  fs.writeFileSync(
-    path.join(repository, ".github/k8s-applications.json"),
-    `${JSON.stringify({ version: 1, managedPaths: ["src/k8s"], applications: [applications[0]] }, null, 2)}\n`,
-  );
-  fs.writeFileSync(path.join(repository, "src/k8s/apps/example/production/kustomization.yaml"), "resources: []\n");
-  git(repository, ["add", "."]);
-  git(repository, ["commit", "--quiet", "-m", "base"]);
-  const baseRevision = git(repository, ["rev-parse", "HEAD"]);
+  const { repository, baseRevision } = createRepository(context, [applications[0]], {
+    "src/k8s/apps/example/production/kustomization.yaml": "resources: []\n",
+  });
 
   const renamedApplication = { ...applications[0], name: "renamed-production" };
-  fs.writeFileSync(
-    path.join(repository, ".github/k8s-applications.json"),
-    `${JSON.stringify({ version: 1, managedPaths: ["src/k8s"], applications: [renamedApplication] }, null, 2)}\n`,
-  );
-  git(repository, ["add", "."]);
-  git(repository, ["commit", "--quiet", "-m", "rename application"]);
-  const headRevision = git(repository, ["rev-parse", "HEAD"]);
+  writeInventory(repository, [renamedApplication]);
+  const headRevision = commit(repository, "rename application");
 
   const result = detectRepository({
     cwd: repository,
