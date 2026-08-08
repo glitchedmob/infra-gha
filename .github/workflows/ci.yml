@@ -25,14 +25,25 @@ jobs:
 
       - uses: raven-actions/actionlint@v2
         with:
-          # GitHub documents these reusable-workflow contexts, but the latest
-          # actionlint release predates them.
-          flags: -ignore workflow_(repository|sha).*not.defined
+          # The latest actionlint release predates these GitHub features.
+          flags: >-
+            -ignore
+            (workflow_(repository|sha).*not.defined|specifying.action.*detect-k8s-applications.*ref.is.missing)
 
       - name: Validate workflow scripts
         run: |
           bash -n .github/scripts/*.sh
           shellcheck .github/scripts/*.sh
-          for script in .github/scripts/*.js; do
+          for script in .github/scripts/*.js .github/actions/*/*.js; do
+            [ -f "$script" ] || continue
             node --check "$script"
           done
+
+  kubernetes-detector-tests:
+    name: Kubernetes detector tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Test detector
+        run: node --test .github/actions/detect-k8s-applications/index.test.js

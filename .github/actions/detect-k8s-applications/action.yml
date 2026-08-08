@@ -1,0 +1,25 @@
+name: Detect Kubernetes Applications
+description: Map changed repository paths to Kubernetes applications
+
+inputs:
+  applications-file:
+    description: Repository-relative path to the Kubernetes application inventory
+    required: true
+  base-revision:
+    description: Base Git revision used to calculate changed paths
+    required: true
+  head-revision:
+    description: Head Git revision used to calculate changed paths
+    required: true
+
+outputs:
+  applications:
+    description: JSON array containing the names of changed applications
+  has-changes:
+    description: Whether one or more managed applications changed
+  matrix:
+    description: GitHub Actions matrix containing changed applications
+
+runs:
+  using: node24
+  main: index.js

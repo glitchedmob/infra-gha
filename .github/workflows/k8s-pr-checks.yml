@@ -1,0 +1,122 @@
+name: Kubernetes PR Checks
+
+on:
+  workflow_call:
+    inputs:
+      applications-file:
+        description: Repository-relative path to the Kubernetes application inventory
+        type: string
+        default: .github/k8s-applications.json
+      base-revision:
+        description: Base Git revision; defaults to the pull request base
+        type: string
+      head-revision:
+        description: Head Git revision; defaults to the pull request head
+        type: string
+      kustomize-version:
+        description: Kustomize version used to render changed applications
+        type: string
+        default: 5.8.1
+    outputs:
+      changed-applications:
+        description: JSON array containing the names of changed applications
+        value: ${{ jobs.detect.outputs.applications }}
+
+permissions:
+  contents: read
+
+jobs:
+  detect:
+    name: Detect changed applications
+    runs-on: ubuntu-latest
+    outputs:
+      applications: ${{ steps.detect.outputs.applications }}
+      has-changes: ${{ steps.detect.outputs.has-changes }}
+      matrix: ${{ steps.detect.outputs.matrix }}
+    steps:
+      - name: Check out caller repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.head-revision || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Detect changed applications
+        id: detect
+        uses: $/.github/actions/detect-k8s-applications
+        with:
+          applications-file: ${{ inputs.applications-file }}
+          base-revision: ${{ inputs.base-revision || github.event.pull_request.base.sha || github.event.before }}
+          head-revision: ${{ inputs.head-revision || github.event.pull_request.head.sha || github.sha }}
+
+  render:
+    name: Render ${{ matrix.application }}
+    if: ${{ needs.detect.outputs.has-changes == 'true' }}
+    needs: detect
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.detect.outputs.matrix) }}
+    steps:
+      - name: Check out caller repository
+        if: ${{ !matrix.deleted }}
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.head-revision || github.event.pull_request.head.sha || github.sha }}
+
+      - name: Set up Kustomize
+        if: ${{ !matrix.deleted }}
+        uses: imranismail/setup-kustomize@v2
+        with:
+          kustomize-version: ${{ inputs.kustomize-version }}
+
+      - name: Render Kustomization
+        if: ${{ !matrix.deleted }}
+        env:
+          KUSTOMIZATION_PATH: ${{ matrix.kustomization }}
+        run: kustomize build "./$KUSTOMIZATION_PATH" > /dev/null
+
+      - name: Record deleted application
+        if: ${{ matrix.deleted }}
+        env:
+          APPLICATION: ${{ matrix.application }}
+        run: echo "Application \`$APPLICATION\` was removed; there is no head Kustomization to render." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Add application summary
+        if: ${{ always() }}
+        env:
+          APPLICATION: ${{ matrix.application }}
+          DELETED: ${{ matrix.deleted }}
+          KUSTOMIZATION_PATH: ${{ matrix.kustomization }}
+        run: |
+          {
+            echo "## $APPLICATION"
+            echo
+            echo "- Kustomization: \`$KUSTOMIZATION_PATH\`"
+            echo "- Deleted: \`$DELETED\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  result:
+    name: Kubernetes checks
+    if: ${{ always() }}
+    needs:
+      - detect
+      - render
+    runs-on: ubuntu-latest
+    env:
+      DETECT_RESULT: ${{ needs.detect.result }}
+      HAS_CHANGES: ${{ needs.detect.outputs.has-changes }}
+      RENDER_RESULT: ${{ needs.render.result }}
+    steps:
+      - name: Check results
+        run: |
+          set -euo pipefail
+          if [ "$DETECT_RESULT" != "success" ]; then
+            echo "Application detection failed" >&2
+            exit 1
+          fi
+          if [ "$HAS_CHANGES" = "true" ] && [ "$RENDER_RESULT" != "success" ]; then
+            echo "One or more application renders failed" >&2
+            exit 1
+          fi

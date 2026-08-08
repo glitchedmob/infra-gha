@@ -8,8 +8,8 @@ Provides reusable GitHub Actions workflows and composite actions used across inf
 - Owns: release/versioning automation for this workflow library.
 
 ## Structure
-- `.github/workflows/`: Reusable workflows (`tf-validate`, `tf-plan-apply`, `ansible-lint`, `ansible-run`, `ansible-auto`, `kustomize-image-pr`) and repo CI/release workflows.
-- `.github/actions/`: Shared composite actions (`setup-tf`, `setup-ansible`, `headscale-connect`, `encrypt-artifact`).
+- `.github/workflows/`: Reusable workflows (`tf-validate`, `tf-plan-apply`, `ansible-lint`, `ansible-run`, `ansible-auto`, `k8s-pr-checks`, `kustomize-image-pr`) and repo CI/release workflows.
+- `.github/actions/`: Shared composite actions (`detect-k8s-applications`, `setup-tf`, `setup-ansible`, `headscale-connect`, `encrypt-artifact`).
 - `.releaserc.json`: Semantic release configuration for tagged workflow releases.
 
 ## Use
