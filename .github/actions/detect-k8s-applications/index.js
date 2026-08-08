@@ -261,46 +261,50 @@ function createWorkflowOutputs(result) {
   return { matrix, applications };
 }
 
-async function run({ core }) {
-  try {
-    const result = detectRepository({
-      cwd: process.env.REPOSITORY_PATH || process.env.GITHUB_WORKSPACE || process.cwd(),
-      configPath: process.env.APPLICATIONS_FILE,
-      baseRevision: process.env.BASE_REVISION,
-      headRevision: process.env.HEAD_REVISION,
-    });
-    const hasChanges = result.applications.length > 0;
-    const outputs = createWorkflowOutputs(result);
-    core.setOutput("matrix", outputs.matrix);
-    core.setOutput("applications", outputs.applications);
-    core.setOutput("has-changes", String(hasChanges));
+function writeOutput(name, value) {
+  if (!process.env.GITHUB_OUTPUT) throw new Error("GITHUB_OUTPUT is not set");
+  fs.appendFileSync(process.env.GITHUB_OUTPUT, `${name}=${value}\n`);
+}
 
-    core.summary.addHeading("Changed Kubernetes applications", 2);
-    if (!hasChanges) {
-      core.summary.addRaw("No managed applications changed.\n");
-    } else {
-      core.summary.addTable([
-        [
-          { data: "Application", header: true },
-          { data: "Kustomization", header: true },
-          { data: "Changed paths", header: true },
-        ],
-        ...result.matrix.include.map((application) => [
-          application.application,
-          application.deleted ? "Deleted" : `\`${application.kustomization}\``,
-          [
-            ...application.changedPaths.slice(0, 20).map((changedPath) => `\`${changedPath}\``),
-            ...(application.changedPaths.length > 20
-              ? [`...and ${application.changedPaths.length - 20} more`]
-              : []),
-          ].join("<br>"),
-        ]),
-      ]);
+function escapeTableCell(value) {
+  return value.replace(/\|/g, "\\|").replace(/\r?\n/g, "<br>");
+}
+
+function writeSummary(result) {
+  if (!process.env.GITHUB_STEP_SUMMARY) return;
+  const lines = ["## Changed Kubernetes applications", ""];
+  if (result.applications.length === 0) {
+    lines.push("No managed applications changed.", "");
+  } else {
+    lines.push("| Application | Kustomization | Changed paths |", "| --- | --- | --- |");
+    for (const application of result.matrix.include) {
+      const changedPaths = [
+        ...application.changedPaths.slice(0, 20).map((changedPath) => `\`${changedPath}\``),
+        ...(application.changedPaths.length > 20 ? [`...and ${application.changedPaths.length - 20} more`] : []),
+      ].join("<br>");
+      lines.push(
+        `| ${escapeTableCell(application.application)} | ${
+          application.deleted ? "Deleted" : `\`${escapeTableCell(application.kustomization)}\``
+        } | ${escapeTableCell(changedPaths)} |`,
+      );
     }
-    await core.summary.write();
-  } catch (error) {
-    core.setFailed(error.message);
+    lines.push("");
   }
+  fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${lines.join("\n")}\n`);
+}
+
+function run() {
+  const result = detectRepository({
+    cwd: process.env.REPOSITORY_PATH || process.env.GITHUB_WORKSPACE || process.cwd(),
+    configPath: process.env.APPLICATIONS_FILE,
+    baseRevision: process.env.BASE_REVISION,
+    headRevision: process.env.HEAD_REVISION,
+  });
+  const outputs = createWorkflowOutputs(result);
+  writeOutput("matrix", outputs.matrix);
+  writeOutput("applications", outputs.applications);
+  writeOutput("has-changes", String(result.applications.length > 0));
+  writeSummary(result);
 }
 
 module.exports = run;
@@ -310,3 +314,12 @@ module.exports.detectRepository = detectRepository;
 module.exports.emptyConfig = emptyConfig;
 module.exports.getChangedPaths = getChangedPaths;
 module.exports.parseConfig = parseConfig;
+
+if (require.main === module) {
+  try {
+    run();
+  } catch (error) {
+    console.error(error.message);
+    process.exitCode = 1;
+  }
+}

@@ -1,0 +1,40 @@
+name: Detect Kubernetes Applications
+description: Map changed repository paths to Kubernetes applications
+
+inputs:
+  applications-file:
+    description: Repository-relative path to the Kubernetes application inventory
+    required: true
+  base-revision:
+    description: Base Git revision used to calculate changed paths
+    required: true
+  head-revision:
+    description: Head Git revision used to calculate changed paths
+    required: true
+  repository-path:
+    description: Absolute path to the checked-out caller repository
+    required: true
+
+outputs:
+  applications:
+    description: JSON array containing the names of changed applications
+    value: ${{ steps.detect.outputs.applications }}
+  has-changes:
+    description: Whether one or more managed applications changed
+    value: ${{ steps.detect.outputs.has-changes }}
+  matrix:
+    description: GitHub Actions matrix containing changed applications
+    value: ${{ steps.detect.outputs.matrix }}
+
+runs:
+  using: composite
+  steps:
+    - name: Detect changed applications
+      id: detect
+      shell: bash
+      env:
+        APPLICATIONS_FILE: ${{ inputs.applications-file }}
+        BASE_REVISION: ${{ inputs.base-revision }}
+        HEAD_REVISION: ${{ inputs.head-revision }}
+        REPOSITORY_PATH: ${{ inputs.repository-path }}
+      run: node "$GITHUB_ACTION_PATH/index.js"

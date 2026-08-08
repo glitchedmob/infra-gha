@@ -11,7 +11,7 @@ const {
   detectRepository,
   emptyConfig,
   parseConfig,
-} = require("./detect-k8s-applications");
+} = require("./index");
 
 function config({ applications, managedPaths = ["src/k8s"], globalPaths = [] }) {
   return parseConfig({ version: 1, managedPaths, globalPaths, applications }, "test inventory");

@@ -58,16 +58,12 @@ jobs:
 
       - name: Detect changed applications
         id: detect
-        uses: actions/github-script@v9
-        env:
-          APPLICATIONS_FILE: ${{ inputs.applications-file }}
-          BASE_REVISION: ${{ inputs.base-revision || github.event.pull_request.base.sha || github.event.before }}
-          HEAD_REVISION: ${{ inputs.head-revision || github.event.pull_request.head.sha || github.sha }}
-          REPOSITORY_PATH: ${{ github.workspace }}/repository
+        uses: ./workflow/.github/actions/detect-k8s-applications
         with:
-          script: |
-            const detect = require(`${process.env.GITHUB_WORKSPACE}/workflow/.github/scripts/detect-k8s-applications.js`);
-            await detect({ core });
+          applications-file: ${{ inputs.applications-file }}
+          base-revision: ${{ inputs.base-revision || github.event.pull_request.base.sha || github.event.before }}
+          head-revision: ${{ inputs.head-revision || github.event.pull_request.head.sha || github.sha }}
+          repository-path: ${{ github.workspace }}/repository
 
   render:
     name: Render ${{ matrix.application }}
