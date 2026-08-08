@@ -55,3 +55,9 @@ jobs:
 ```
 
 The workflow requires the target Kustomization to have exactly one matching existing `newTag`. It does not add missing image declarations or modify image names. When `auto-merge` is enabled, the workflow requests auto-merge and falls back to an immediate merge if auto-merge is unavailable. Pull requests are always squash merged.
+
+## Kubernetes Pull Request Checks
+
+`k8s-pr-checks.yml` discovers changed Kustomizations under configured roots and validates each affected render. It runs Kustomize, strict Kubeconform schema validation for built-in resources, and Pluto Kubernetes API deprecation checks. CRDs without published schemas are skipped by Kubeconform.
+
+Callers can override the pinned Kustomize, Kubeconform, Pluto, and target Kubernetes versions. The Kubernetes version defaults to `1.35.0` and is shared by the schema and deprecation checks.

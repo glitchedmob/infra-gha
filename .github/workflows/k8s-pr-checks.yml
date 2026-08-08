@@ -17,6 +17,18 @@ on:
         description: Kustomize version used to render changed Kustomizations
         type: string
         default: 5.8.1
+      kubernetes-version:
+        description: Kubernetes version used for schema and API deprecation checks
+        type: string
+        default: 1.35.0
+      kubeconform-version:
+        description: Kubeconform version used to validate rendered manifests
+        type: string
+        default: v0.8.0
+      pluto-version:
+        description: Pluto version used to detect deprecated Kubernetes APIs
+        type: string
+        default: v5.24.1
     outputs:
       changed-kustomizations:
         description: JSON array containing changed Kustomization paths
@@ -50,7 +62,7 @@ jobs:
           head-revision: ${{ inputs.head-revision || github.event.pull_request.head.sha || github.sha }}
 
   render:
-    name: Render ${{ matrix.kustomization }}
+    name: Check ${{ matrix.kustomization }}
     if: ${{ needs.detect.outputs.has-changes == 'true' }}
     needs: detect
     runs-on: ubuntu-latest
@@ -71,11 +83,49 @@ jobs:
         with:
           kustomize-version: ${{ inputs.kustomize-version }}
 
+      - name: Set up Kubeconform
+        if: ${{ !matrix.deleted }}
+        uses: jaxxstorm/action-install-gh-release@v2
+        with:
+          repo: yannh/kubeconform
+          tag: ${{ inputs.kubeconform-version }}
+          cache: enable
+
+      - name: Set up Pluto
+        if: ${{ !matrix.deleted }}
+        uses: jaxxstorm/action-install-gh-release@v2
+        with:
+          repo: FairwindsOps/pluto
+          tag: ${{ inputs.pluto-version }}
+          cache: enable
+
       - name: Render Kustomization
         if: ${{ !matrix.deleted }}
         env:
           KUSTOMIZATION_PATH: ${{ matrix.kustomization }}
-        run: kustomize build "./$KUSTOMIZATION_PATH" > /dev/null
+        run: kustomize build "./$KUSTOMIZATION_PATH" > "$RUNNER_TEMP/rendered.yaml"
+
+      - name: Validate Kubernetes schemas
+        if: ${{ !matrix.deleted }}
+        env:
+          KUBERNETES_VERSION: ${{ inputs.kubernetes-version }}
+        run: |
+          kubeconform \
+            -strict \
+            -summary \
+            -ignore-missing-schemas \
+            -kubernetes-version "${KUBERNETES_VERSION#v}" \
+            "$RUNNER_TEMP/rendered.yaml"
+
+      - name: Detect deprecated Kubernetes APIs
+        if: ${{ !matrix.deleted }}
+        env:
+          KUBERNETES_VERSION: ${{ inputs.kubernetes-version }}
+        run: |
+          pluto detect "$RUNNER_TEMP/rendered.yaml" \
+            --components k8s \
+            --output wide \
+            --target-versions "k8s=v${KUBERNETES_VERSION#v}"
 
       - name: Record deleted Kustomization
         if: ${{ matrix.deleted }}
@@ -116,6 +166,6 @@ jobs:
             exit 1
           fi
           if [ "$HAS_CHANGES" = "true" ] && [ "$RENDER_RESULT" != "success" ]; then
-            echo "One or more Kustomization renders failed" >&2
+            echo "One or more Kustomization checks failed" >&2
             exit 1
           fi
