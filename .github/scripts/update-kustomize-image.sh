@@ -96,6 +96,8 @@ if [ -z "$identifier" ] || [ -z "$image_name" ]; then
   exit 1
 fi
 
-echo "branch=automation/images/$image_name/${identifier:0:100}" >> "$GITHUB_OUTPUT"
-echo "kustomization-file=$relative_file" >> "$GITHUB_OUTPUT"
-echo "promotion-id=$identifier" >> "$GITHUB_OUTPUT"
+{
+  echo "branch=automation/images/$image_name/${identifier:0:100}"
+  echo "kustomization-file=$relative_file"
+  echo "promotion-id=$identifier"
+} >> "$GITHUB_OUTPUT"
