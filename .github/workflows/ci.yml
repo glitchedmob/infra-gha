@@ -36,3 +36,6 @@ jobs:
           for script in .github/scripts/*.js; do
             node --check "$script"
           done
+
+      - name: Test workflow scripts
+        run: node --test .github/scripts/*.test.js
