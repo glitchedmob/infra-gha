@@ -3,10 +3,10 @@ name: Kubernetes PR Checks
 on:
   workflow_call:
     inputs:
-      applications-file:
-        description: Repository-relative path to the Kubernetes application inventory
+      kustomization-roots:
+        description: Newline-separated repository paths containing Kustomizations
+        required: true
         type: string
-        default: .github/k8s-applications.json
       base-revision:
         description: Base Git revision; defaults to the pull request base
         type: string
@@ -14,23 +14,23 @@ on:
         description: Head Git revision; defaults to the pull request head
         type: string
       kustomize-version:
-        description: Kustomize version used to render changed applications
+        description: Kustomize version used to render changed Kustomizations
         type: string
         default: 5.8.1
     outputs:
-      changed-applications:
-        description: JSON array containing the names of changed applications
-        value: ${{ jobs.detect.outputs.applications }}
+      changed-kustomizations:
+        description: JSON array containing changed Kustomization paths
+        value: ${{ jobs.detect.outputs.kustomizations }}
 
 permissions:
   contents: read
 
 jobs:
   detect:
-    name: Detect changed applications
+    name: Detect changed Kustomizations
     runs-on: ubuntu-latest
     outputs:
-      applications: ${{ steps.detect.outputs.applications }}
+      kustomizations: ${{ steps.detect.outputs.kustomizations }}
       has-changes: ${{ steps.detect.outputs.has-changes }}
       matrix: ${{ steps.detect.outputs.matrix }}
     steps:
@@ -41,16 +41,16 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.head-revision || github.event.pull_request.head.sha || github.sha }}
 
-      - name: Detect changed applications
+      - name: Detect changed Kustomizations
         id: detect
-        uses: $/.github/actions/detect-k8s-applications
+        uses: $/.github/actions/detect-kustomizations
         with:
-          applications-file: ${{ inputs.applications-file }}
+          kustomization-roots: ${{ inputs.kustomization-roots }}
           base-revision: ${{ inputs.base-revision || github.event.pull_request.base.sha || github.event.before }}
           head-revision: ${{ inputs.head-revision || github.event.pull_request.head.sha || github.sha }}
 
   render:
-    name: Render ${{ matrix.application }}
+    name: Render ${{ matrix.kustomization }}
     if: ${{ needs.detect.outputs.has-changes == 'true' }}
     needs: detect
     runs-on: ubuntu-latest
@@ -77,21 +77,20 @@ jobs:
           KUSTOMIZATION_PATH: ${{ matrix.kustomization }}
         run: kustomize build "./$KUSTOMIZATION_PATH" > /dev/null
 
-      - name: Record deleted application
+      - name: Record deleted Kustomization
         if: ${{ matrix.deleted }}
         env:
-          APPLICATION: ${{ matrix.application }}
-        run: echo "Application \`$APPLICATION\` was removed; there is no head Kustomization to render." >> "$GITHUB_STEP_SUMMARY"
+          KUSTOMIZATION_PATH: ${{ matrix.kustomization }}
+        run: echo "Kustomization \`$KUSTOMIZATION_PATH\` was removed; there is no head target to render." >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Add application summary
+      - name: Add Kustomization summary
         if: ${{ always() }}
         env:
-          APPLICATION: ${{ matrix.application }}
           DELETED: ${{ matrix.deleted }}
           KUSTOMIZATION_PATH: ${{ matrix.kustomization }}
         run: |
           {
-            echo "## $APPLICATION"
+            echo "## $KUSTOMIZATION_PATH"
             echo
             echo "- Kustomization: \`$KUSTOMIZATION_PATH\`"
             echo "- Deleted: \`$DELETED\`"
@@ -113,10 +112,10 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$DETECT_RESULT" != "success" ]; then
-            echo "Application detection failed" >&2
+            echo "Kustomization detection failed" >&2
             exit 1
           fi
           if [ "$HAS_CHANGES" = "true" ] && [ "$RENDER_RESULT" != "success" ]; then
-            echo "One or more application renders failed" >&2
+            echo "One or more Kustomization renders failed" >&2
             exit 1
           fi

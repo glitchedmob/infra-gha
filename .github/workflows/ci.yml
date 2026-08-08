@@ -28,7 +28,7 @@ jobs:
           # The latest actionlint release predates these GitHub features.
           flags: >-
             -ignore
-            (workflow_(repository|sha).*not.defined|specifying.action.*detect-k8s-applications.*ref.is.missing)
+            (workflow_(repository|sha).*not.defined|specifying.action.*detect-kustomizations.*ref.is.missing)
 
       - name: Validate workflow scripts
         run: |
@@ -46,4 +46,4 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Test detector
-        run: node --test .github/actions/detect-k8s-applications/index.test.js
+        run: node --test .github/actions/detect-kustomizations/index.test.js

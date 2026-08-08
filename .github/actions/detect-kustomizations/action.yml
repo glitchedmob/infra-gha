@@ -1,0 +1,25 @@
+name: Detect Changed Kustomizations
+description: Discover Kustomizations affected by repository changes
+
+inputs:
+  kustomization-roots:
+    description: Newline-separated repository paths containing Kustomizations
+    required: true
+  base-revision:
+    description: Base Git revision used to calculate changed paths
+    required: true
+  head-revision:
+    description: Head Git revision used to calculate changed paths
+    required: true
+
+outputs:
+  kustomizations:
+    description: JSON array containing changed Kustomization paths
+  has-changes:
+    description: Whether one or more Kustomizations changed
+  matrix:
+    description: GitHub Actions matrix containing changed Kustomizations
+
+runs:
+  using: node24
+  main: index.js
