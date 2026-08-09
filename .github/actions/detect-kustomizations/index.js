@@ -175,7 +175,7 @@ function discoverKustomizations(cwd, revision, roots) {
     targets.set(directory, {
       kustomization: directory,
       file: kustomization,
-      renderable: roots.some((root) => isWithin(directory, root)),
+      renderable: path.posix.basename(directory) !== "base" && roots.some((root) => isWithin(directory, root)),
       references: extractReferences(content, kustomization, files),
     });
   }
@@ -214,13 +214,20 @@ function detectKustomizations({ headTargets, baseTargets = [], changedPaths }) {
   const uniqueChangedPaths = [...new Set(changedPaths)].sort();
   const reasons = new Map();
 
-  for (const target of targets) {
-    const targetReasons = uniqueChangedPaths.filter(
-      (changedPath) =>
-        isWithin(changedPath, target.kustomization) ||
-        target.references.some((reference) => referenceContains(reference, changedPath)),
-    );
-    if (targetReasons.length > 0) reasons.set(target.kustomization, new Set(targetReasons));
+  for (const changedPath of uniqueChangedPaths) {
+    const enclosingTarget = targets
+      .filter((target) => isWithin(changedPath, target.kustomization))
+      .sort((left, right) => right.kustomization.length - left.kustomization.length)[0];
+    for (const target of targets) {
+      if (
+        target === enclosingTarget ||
+        target.references.some((reference) => referenceContains(reference, changedPath))
+      ) {
+        const targetReasons = reasons.get(target.kustomization) ?? new Set();
+        targetReasons.add(changedPath);
+        reasons.set(target.kustomization, targetReasons);
+      }
+    }
   }
 
   let changed = true;
@@ -267,7 +274,7 @@ function detectRepository({ cwd, roots, baseRevision, headRevision }) {
   const baseTargets = discoverKustomizations(cwd, changes.mergeBase, normalizedRoots);
   const headTargets = discoverKustomizations(cwd, headRevision, normalizedRoots);
   for (const root of normalizedRoots) {
-    if (![...baseTargets, ...headTargets].some((target) => target.renderable && isWithin(target.kustomization, root))) {
+    if (![...baseTargets, ...headTargets].some((target) => isWithin(target.kustomization, root))) {
       throw new Error(`Kustomization root contains no Kustomizations: ${root}`);
     }
   }
