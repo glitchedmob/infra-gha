@@ -20,17 +20,17 @@ function target(kustomization, references = [], renderable = true) {
     kustomization,
     file: `${kustomization}/kustomization.yaml`,
     references,
-    renderable,
+    renderable: renderable && path.posix.basename(kustomization) !== "base",
   };
 }
 
-test("selects enclosing Kustomizations", () => {
+test("selects the nearest enclosing Kustomization", () => {
   const result = detectKustomizations({
     headTargets: [target("src/k8s"), target("src/k8s/apps/example")],
     changedPaths: ["src/k8s/apps/example/deployment.yaml"],
   });
 
-  assert.deepEqual(result.kustomizations, ["src/k8s", "src/k8s/apps/example"]);
+  assert.deepEqual(result.kustomizations, ["src/k8s/apps/example"]);
 });
 
 test("selects consumers of a shared Kustomization", () => {
@@ -42,7 +42,7 @@ test("selects consumers of a shared Kustomization", () => {
     changedPaths: ["src/k8s/shared/base/deployment.yaml"],
   });
 
-  assert.deepEqual(result.kustomizations, ["src/k8s/apps/example", "src/k8s/shared/base"]);
+  assert.deepEqual(result.kustomizations, ["src/k8s/apps/example"]);
 });
 
 test("propagates transitive Kustomization dependencies", () => {
@@ -55,7 +55,7 @@ test("propagates transitive Kustomization dependencies", () => {
     changedPaths: ["src/k8s/config/settings.yaml"],
   });
 
-  assert.deepEqual(result.kustomizations, ["src/k8s/apps", "src/k8s/apps/example", "src/k8s/shared/base"]);
+  assert.deepEqual(result.kustomizations, ["src/k8s/apps", "src/k8s/apps/example"]);
 });
 
 test("propagates dependencies through Kustomizations outside configured roots", () => {
@@ -207,16 +207,29 @@ test("repository detection maps both sides of a rename", (context) => {
 
 test("repository detection fans out a shared-base change", (context) => {
   const { repository, baseRevision } = createRepository(context, {
-    "src/k8s/apps/example/kustomization.yaml": "resources:\n  - ../../shared/base\n",
-    "src/k8s/shared/base/kustomization.yaml": "resources:\n  - deployment.yaml\n",
-    "src/k8s/shared/base/deployment.yaml": "kind: Deployment\n",
+    "src/k8s/apps/example/base/kustomization.yaml": "resources:\n  - deployment.yaml\nimages:\n  - name: example\n    newTag: PLACEHOLDER\n",
+    "src/k8s/apps/example/base/deployment.yaml": "kind: Deployment\n",
+    "src/k8s/apps/example/staging/kustomization.yaml": "resources:\n  - ../base\nimages:\n  - name: example\n    newTag: staging\n",
+    "src/k8s/apps/example/production/kustomization.yaml": "resources:\n  - ../base\nimages:\n  - name: example\n    newTag: production\n",
   });
-  fs.writeFileSync(path.join(repository, "src/k8s/shared/base/deployment.yaml"), "kind: Deployment\nmetadata: {}\n");
+  fs.writeFileSync(path.join(repository, "src/k8s/apps/example/base/deployment.yaml"), "kind: Deployment\nmetadata: {}\n");
   const headRevision = commit(repository, "change shared base");
 
-  const result = detectRepository({ cwd: repository, roots: "src/k8s", baseRevision, headRevision });
+  const result = detectRepository({
+    cwd: repository,
+    roots: [
+      "src/k8s/apps/example/base",
+      "src/k8s/apps/example/staging",
+      "src/k8s/apps/example/production",
+    ].join("\n"),
+    baseRevision,
+    headRevision,
+  });
 
-  assert.deepEqual(result.kustomizations, ["src/k8s/apps/example", "src/k8s/shared/base"]);
+  assert.deepEqual(result.kustomizations, [
+    "src/k8s/apps/example/production",
+    "src/k8s/apps/example/staging",
+  ]);
 });
 
 test("action reads revisions and writes workflow outputs", (context) => {
