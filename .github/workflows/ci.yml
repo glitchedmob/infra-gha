@@ -2,10 +2,6 @@ name: CI
 
 on:
   pull_request:
-    paths:
-      - .github/workflows/**
-      - .github/actions/**
-      - .github/scripts/**
   push:
     branches:
       - main
@@ -18,7 +14,28 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      ci: ${{ github.event_name != 'pull_request' || steps.ci.outputs.any_changed == 'true' }}
+      kubernetes-detector: ${{ github.event_name != 'pull_request' || steps.kubernetes-detector.outputs.any_changed == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: ci
+        uses: tj-actions/changed-files@v47
+        with:
+          files: |
+            .github/workflows/**
+            .github/actions/**
+            .github/scripts/**
+      - id: kubernetes-detector
+        uses: tj-actions/changed-files@v47
+        with:
+          files: .github/actions/detect-kustomizations/**
+
   actionlint:
+    needs: changes
+    if: needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -41,9 +58,22 @@ jobs:
 
   kubernetes-detector-tests:
     name: Kubernetes detector tests
+    needs: changes
+    if: needs.changes.outputs.kubernetes-detector == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
 
       - name: Test detector
         run: node --test .github/actions/detect-kustomizations/index.test.js
+
+  ci-checks:
+    name: CI checks
+    if: always()
+    needs: [changes, actionlint, kubernetes-detector-tests]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe
+        with:
+          allowed-skips: actionlint, kubernetes-detector-tests
+          jobs: ${{ toJSON(needs) }}
