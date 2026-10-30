@@ -147,6 +147,7 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         if: ${{ steps.detect.outputs.playbooks != '[]' }}
         with:
+          version: "0.13.6"
           enable-cache: true
           working-directory: ${{ inputs.working-directory }}
 
