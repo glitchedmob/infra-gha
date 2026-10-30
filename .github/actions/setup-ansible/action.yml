@@ -9,6 +9,7 @@ runs:
   steps:
     - uses: astral-sh/setup-uv@v7
       with:
+        version: "0.13.6"
         enable-cache: true
         working-directory: ${{ inputs.working-directory }}
 
